@@ -18,7 +18,20 @@ const uniq = (p: string) => `${p}-${Date.now()}-${seq++}`;
 /** Create an ACTIVE user of a role and return { id, jwt }. */
 export async function makeUser(role: UserRole): Promise<{ id: string; jwt: string; role: UserRole }> {
   const user = await prisma.user.create({
-    data: { email: `${uniq("u")}@test.local`, role, status: "ACTIVE", passwordHash: "x" },
+    data: {
+      email: `${uniq("u")}@test.local`,
+      role,
+      status: "ACTIVE",
+      passwordHash: "x",
+      // BLOCK-07 — VASRUE Digital Media, 24 Oct 2026.
+      // firstName and lastName are non-nullable on User with no defaults, so
+      // every makeUser() call raised PrismaClientValidationError and all 27
+      // N1-N11 tests died here before reaching a single assertion. The suite
+      // had therefore never executed against a migrated database.
+      // Test-harness only: no application code, route, guard or schema changed.
+      firstName: "Test",
+      lastName: role,
+    },
     select: { id: true, role: true },
   });
   const { jwt } = await createSession(user.id, role);
