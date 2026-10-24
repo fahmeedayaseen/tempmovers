@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" role="img" aria-labelledby="title desc">
+  <title id="title">TempMovers</title>
+  <desc id="desc">Blue moving truck icon followed by Temp in navy and Movers in blue.</desc>
+  <g transform="translate(2 10)" fill="none" stroke="#1557E8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 10h25v24H4z"/>
+    <path d="M29 19h12l10 9v6H29z"/>
+    <path d="M8 42a6 6 0 1 0 12 0 6 6 0 0 0-12 0z" fill="#1557E8"/>
+    <path d="M37 42a6 6 0 1 0 12 0 6 6 0 0 0-12 0z" fill="#1557E8"/>
+    <path d="M0 16h12M0 24h9M0 32h6"/>
+  </g>
+  <text x="66" y="49" font-family="Inter, Arial, sans-serif" font-size="40" font-weight="800" letter-spacing="-1.5">
+    <tspan fill="#0D1A2E">Temp</tspan><tspan fill="#1557E8">Movers</tspan>
+  </text>
+</svg>

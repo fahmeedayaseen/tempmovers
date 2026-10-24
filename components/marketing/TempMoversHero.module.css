@@ -1,0 +1,48 @@
+.nav{height:78px;padding:0 40px;display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid #e7eaf0;position:relative;z-index:20}
+.brand{display:flex;align-items:center}
+.brand img{width:245px;height:auto}
+.navLinks{display:flex;gap:34px;font-weight:700;font-size:15px}
+.navLinks a{color:#101624;text-decoration:none;background:none;border:none;cursor:pointer;font:inherit}
+.navActions{display:flex;gap:12px}
+.loginButton,.primaryButton{padding:11px 20px;border-radius:10px;text-decoration:none;font-weight:800;border:none;cursor:pointer;font:inherit;font-size:15px}
+.loginButton{color:#111827;border:1px solid #d9dee8;background:#fff}
+.primaryButton{color:#fff;background:#1557e8}
+.hero{position:relative;isolation:isolate;min-height:740px;overflow:hidden;background:#eef7ff}
+.backdrop{position:absolute;inset:0;z-index:0;width:100%;height:100%}
+.backdropImage{object-fit:cover;object-position:center}
+.backdropOverlay{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,rgba(255,255,255,.92) 0%,rgba(255,255,255,.72) 36%,rgba(255,255,255,.24) 68%,rgba(255,255,255,.06) 100%)}
+.heroContent{position:relative;z-index:2;max-width:1440px;margin:0 auto;padding:40px 58px 60px;display:grid;grid-template-columns:minmax(440px,650px) minmax(480px,600px);gap:70px;align-items:start}
+.heroCopy{padding-top:14px}
+.locationBadge{display:inline-flex;align-items:center;gap:.5rem;background:rgba(255,255,255,.88);color:#0d2343;border-radius:999px;padding:8px 15px;font-weight:700;font-size:12px;backdrop-filter:blur(8px)}
+.heroCopy h1{font-size:64px;line-height:.97;letter-spacing:-3px;color:#08152f;margin:24px 0 18px;font-weight:900}
+.heroCopy h1 span{color:#1557e8}
+.subtitle{font-size:19px;line-height:1.45;color:#182235;max-width:520px}
+.stats{display:flex;gap:32px;margin:30px 0}
+.stats div{display:flex;flex-direction:column}
+.stats strong{font-size:19px;color:#09152e}
+.stats span{font-size:12px;color:#5f697a}
+.noLiveData{font-size:12px;color:#5f697a;font-style:italic}
+.serviceButtons{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.serviceButtons a,.serviceButtons button{background:#fff;border:1px solid #4b72ff;border-radius:12px;padding:17px 14px;text-decoration:none;color:#111827;min-height:92px;display:flex;flex-direction:column;justify-content:center;cursor:pointer;font:inherit;text-align:left}
+.serviceButtons strong{font-size:14px}
+.serviceButtons span{font-size:12px;color:#596579;margin-top:5px}
+.serviceButtons .servicePrimary{background:#1557e8;color:#fff}
+.serviceButtons .servicePrimary span{color:#dce7ff}
+.quoteCard{background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border:1px solid rgba(216,224,236,.9);border-radius:18px;box-shadow:0 22px 50px rgba(18,39,70,.17);padding:24px;margin-top:4px}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:22px}
+.tabs button{border:0;background:#f4f5f7;border-radius:10px;padding:11px 8px;font-size:13px;font-weight:800;color:#151b28;cursor:pointer;font-family:inherit}
+.tabs .activeTab{background:#eaf0ff;color:#1557e8}
+.quoteCard h2{font-size:26px;margin:0;color:#111827}
+.quoteCard>p{font-size:14px;color:#4f5969;margin:3px 0 18px}
+.quoteCard form{display:grid;gap:12px}
+.quoteCard label{display:block;border:1px solid #dde2eb;border-radius:11px;padding:9px 13px;background:#fff}
+.quoteCard label span{display:block;font-size:11px;font-weight:800;color:#202939;margin-bottom:2px}
+.quoteCard input{border:0;outline:none;width:100%;font-size:14px;color:#182235;background:transparent}
+.formRow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.quoteButton,.freightButton{border:0;border-radius:10px;padding:15px;color:#fff;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit}
+.quoteButton{background:#1557e8}
+.freightButton{background:#6d43e5}
+.badges{display:flex;justify-content:space-between;gap:8px;margin-top:15px;font-size:11px;font-weight:800;color:#0c8f55}
+.badges span{background:#f6f7f9;padding:7px 9px;border-radius:999px;white-space:nowrap}
+@media(max-width:1080px){.navLinks{display:none}.heroContent{grid-template-columns:1fr;padding:38px 28px}.heroCopy h1{font-size:52px}.quoteCard{max-width:650px}.backdropOverlay{background:rgba(255,255,255,.76)}}
+@media(max-width:680px){.nav{padding:0 18px}.brand img{width:185px}.navActions .loginButton{display:none}.heroContent{padding:28px 18px 44px}.heroCopy h1{font-size:43px;letter-spacing:-2px}.stats{gap:16px;flex-wrap:wrap}.serviceButtons{grid-template-columns:1fr}.formRow{grid-template-columns:1fr}.badges{flex-wrap:wrap}.quoteCard{padding:18px}.hero{min-height:auto}.backdrop{background-position:62% center}.backdropImage{object-position:62% center}.backdropOverlay{background:linear-gradient(180deg,rgba(255,255,255,.88) 0%,rgba(255,255,255,.74) 55%,rgba(255,255,255,.82) 100%)}}

@@ -1,0 +1,48 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# next.js build output
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# testing
+/coverage
+
+# secrets — real env files are NEVER committed.
+# .env.example is intentionally NOT ignored: it is the authoritative
+# reference for the 73 variables this app needs.
+.env
+.env.local
+.env*.local
+.env.development
+.env.production
+.env.test
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# local prisma databases
+prisma/*.db
+prisma/*.db-journal
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# sentry
+.sentryclirc
+
+# os / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
