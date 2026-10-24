@@ -1,3 +1,15 @@
+/* Tailwind — VASRUE Digital Media, 24 Oct 2026.
+   The seven newer portals were written with Tailwind utility classes while
+   Tailwind was never installed, so they rendered unstyled. Preflight (the
+   global reset) is disabled in tailwind.config.ts so the hand-written design
+   system below is untouched; `base` still emits the custom-property defaults
+   that shadow, ring and transform utilities need.
+   Declared before the design system so these semantic classes keep
+   precedence over utilities where both could apply to the same element. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --ink:#112038; --muted:#637089; --line:#dce4ef; --bg:#f4f7fb;
   --navy:#0d1a2e; --navy2:#172a48; --blue:#246bfd; --teal:#12a892;
