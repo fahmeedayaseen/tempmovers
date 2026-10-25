@@ -180,6 +180,33 @@ async function main() {
     ["INTERSTATE_FREIGHT_ENABLED", false, "Enable only after authority review"],
     ["HOUSEHOLD_GOODS_BROKERAGE_ENABLED", false, "Enable only after authority review"],
     ["EXTERNAL_LOAD_BOARDS_ENABLED", false, "DAT/Truckstop/Uber Freight adapters"],
+
+    // -----------------------------------------------------------------------
+    // BLOCK-03 — VASRUE Digital Media, 24 October 2026.
+    //
+    // The eight freight-brokerage capability flags the application actually
+    // reads were never seeded. Verified empirically against a live database
+    // before this change: the seed created five unrelated flags and none of
+    // these eight, so every brokerage capability check resolved against a row
+    // that did not exist.
+    //
+    // All eight are seeded false on purpose. Freight brokerage stays dormant
+    // until the DOT operating authority, MC number and BMC-84 bond are in
+    // place; seeding them false is what makes that gate explicit and auditable
+    // rather than incidental. Flipping any one of them early would expose
+    // brokerage behaviour the business is not yet licensed to perform.
+    //
+    // Keys were taken from the capability checks in the application code, not
+    // from a document, so they match what is actually read at runtime.
+    // -----------------------------------------------------------------------
+    ["FREIGHT_BROKERAGE_ENABLED", false, "Master brokerage switch — requires DOT authority, MC number and BMC-84 bond"],
+    ["LOAD_POSTING_ENABLED", false, "Posting brokered loads — requires brokerage authority"],
+    ["CARRIER_LOAD_ACCEPTANCE_ENABLED", false, "Carriers accepting brokered loads — requires brokerage authority"],
+    ["DISPATCH_SERVICES_ENABLED", false, "Dispatch-only services on behalf of carriers"],
+    ["DIRECT_SHIPPER_QUOTING_ENABLED", false, "Quoting direct shippers — requires brokerage authority"],
+    ["CARRIER_PAYMENTS_ENABLED", false, "Carrier settlement payouts — also blocked pending payment provider selection"],
+    ["BROKER_CARRIER_AGREEMENTS_ENABLED", false, "Broker-carrier agreement execution — requires brokerage authority"],
+    ["RATE_CONFIRMATION_GENERATION_ENABLED", false, "Rate confirmation generation — requires brokerage authority"],
   ] as const) await prisma.featureFlag.upsert({where:{key},update:{enabled,description},create:{key,enabled,description}});
 
   console.log({ admin: admin.email });

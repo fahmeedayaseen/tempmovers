@@ -1,13 +1,51 @@
 import Stripe from "stripe";
 import { captureIntegrationAlert } from "@/lib/monitoring";
 
-const stripeKey = process.env.STRIPE_SECRET_KEY;
-if (!stripeKey) {
-  throw new Error("STRIPE_SECRET_KEY is required — set it in .env.local (see .env.example).");
+// ---------------------------------------------------------------------------
+// BLOCK-09 — VASRUE Digital Media, 24 October 2026.
+//
+// This module previously constructed the Stripe client at import time and threw
+// if STRIPE_SECRET_KEY was absent. That is a build-time failure, not a runtime
+// one: `next build` imports every route module during "Collecting page data",
+// so the whole application could not be compiled at all without a live Stripe
+// secret present. The practical consequences were that no CI or deployment
+// pipeline could build the project without being handed production payment
+// credentials, and that a missing key surfaced as an opaque webpack stack trace
+// at build time rather than as a clear failure at the point of use.
+//
+// The client is now constructed on first use and cached. The guard and its
+// message are unchanged — they simply fire when Stripe is actually called,
+// which is the only moment the key is genuinely needed.
+//
+// The Proxy keeps the public surface identical, so none of the 21 importing
+// modules change: every call site is of the form stripe.<namespace>.<method>(),
+// and property access still resolves against the real client.
+//
+// This matters beyond tidiness given the client is replacing Stripe: whatever
+// provider follows, the build must not depend on holding its secret, and the
+// payment module must be removable without the build having been built around
+// its presence.
+// ---------------------------------------------------------------------------
+let cachedStripe: Stripe | null = null;
+
+function getStripe(): Stripe {
+  if (cachedStripe) return cachedStripe;
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeKey) {
+    throw new Error("STRIPE_SECRET_KEY is required — set it in .env.local (see .env.example).");
+  }
+  cachedStripe = new Stripe(stripeKey, {
+    apiVersion: "2025-08-27.basil",
+  });
+  return cachedStripe;
 }
 
-export const stripe = new Stripe(stripeKey, {
-  apiVersion: "2025-08-27.basil",
+export const stripe: Stripe = new Proxy({} as Stripe, {
+  get(_target, property, receiver) {
+    const client = getStripe();
+    const value = Reflect.get(client as object, property, receiver);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
 });
 
 /** Maps a Stripe PaymentIntent status to our PaymentStatus enum. requires_action

@@ -47,7 +47,7 @@ export async function GET(request: Request) {
   ) {
     state = "MISMATCH";
     detail = "The DOT/MC on file does not match the last verification. Update your details or re-verify.";
-  } else if (isFmcsaCheckStale(latest.checkedAt)) {
+  } else if (isFmcsaCheckStale(latest.checkedAt.toISOString()) /* VASRUE Digital Media — BLOCK-05: isFmcsaCheckStale takes an ISO string; lib/carriers/eligibility-service.ts:73 already calls it this way. */) {
     state = "STALE";
     detail = "Your FMCSA verification is out of date and will be refreshed.";
   } else {

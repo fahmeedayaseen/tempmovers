@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { SANITIZED_LOAD_SELECT } from "@/lib/access/sanitize-load";
+import type { RouteVisibility } from "@prisma/client"; // VASRUE Digital Media — BLOCK-05.
 import { postLoadSchema } from "@/lib/loads/post-load-schema";
 import { createCarrierRouteLoad } from "@/lib/loads/create-load";
 
@@ -23,7 +24,14 @@ const querySchema = z.object({
 
 type PublicLoadRow = {
   id: string; title: string;
-  visibility: "PUBLIC_PREVIEW" | "VERIFIED_CARRIERS_ONLY" | "PREFERRED_NETWORK" | "PRIVATE_CONFIDENTIAL";
+  // VASRUE Digital Media — BLOCK-05, 24 Oct 2026. This union was written by hand
+  // and had drifted from the schema: RouteVisibility gained INTERNAL_DRAFT, a
+  // fifth value the literal list never picked up, so the query result stopped
+  // being assignable. Referencing the generated enum instead of re-typing it is
+  // the fix that holds — on a public, unauthenticated endpoint whose contract is
+  // "never return anything but PUBLIC_PREVIEW", a hand-maintained copy of a
+  // security-relevant enum is exactly the thing that must not be allowed to drift.
+  visibility: RouteVisibility;
   status: string;
   originCity: string; originState: string; originZip: string | null;
   destinationCity: string; destinationState: string;

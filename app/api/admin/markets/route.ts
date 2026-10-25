@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { Prisma } from "@prisma/client"; // VASRUE Digital Media — BLOCK-05: JSON column typing.
 import { requireMarketAccess, ForbiddenError, MarketNotFoundError } from "@/lib/market-access";
 import { evaluateMarketActivationReadiness } from "@/lib/markets/activation-readiness";
 
@@ -110,7 +111,11 @@ export async function PATCH(request: Request) {
         marketId,
         previousStage: market.stage,
         newStage: changes.stage ?? market.stage,
-        changedFields,
+        // VASRUE Digital Media — BLOCK-05, 24 Oct 2026. changedFields is built with
+        // `unknown` values, which Prisma's JSON input type does not accept. The shape
+        // is a plain JSON object by construction (from/to pairs of scalar field
+        // values), so this asserts what the builder above already guarantees.
+        changedFields: changedFields as unknown as Prisma.InputJsonObject,
         changedById: authed.userId,
         changeReason: reason,
         overrideUsed,

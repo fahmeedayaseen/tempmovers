@@ -75,7 +75,13 @@ export async function POST(request: Request) {
       // Dynamic payment methods so Stripe only offers Afterpay/Clearpay
       // when it determines the account, currency, amount, and customer
       // are actually eligible — never force it into payment_method_types.
-      automatic_payment_methods: { enabled: true },
+        //
+        // BLOCK-05 — VASRUE Digital Media, 24 Oct 2026. automatic_payment_methods
+        // belongs to PaymentIntents, not Checkout Sessions, so Stripe rejected it
+        // outright. The intent above still holds and needs no parameter at all:
+        // a Checkout Session that omits payment_method_types already uses dynamic
+        // payment methods, controlled from the Stripe dashboard. Removed rather
+        // than translated, because the correct way to express it here is silence.
       customer_email: worker.user.email,
       line_items: [{
         quantity: 1,

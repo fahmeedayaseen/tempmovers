@@ -1,0 +1,24 @@
+-- ============================================================================
+-- TempMovers — follow-up migration 002
+-- proofOfDeliveryUrl on FreightLoad
+--
+-- Prepared by VASRUE Digital Media (Clinton Douglas IV), 24 October 2026.
+-- Contract #2942026-1353 — phase 2A.
+--
+-- Origin: the client's own Fix Pack identified that the shipper load-tracking
+-- endpoint selects proofOfDeliveryUrl from FreightLoad, while the column was
+-- declared on CarrierRoute. Adding the column to FreightLoad is the correct
+-- resolution: it leaves the querying code untouched and does not disturb
+-- CarrierRoute, which has its own legitimate use of the same concept.
+--
+-- Generated with `prisma migrate diff` against the migrated database, not by
+-- hand, so this file is exactly the delta between the applied schema and the
+-- amended one. Nothing else differs.
+--
+-- Safety: purely additive. One nullable TEXT column, no default, no backfill
+-- required, no constraint. Zero DROP statements of any kind. Existing rows are
+-- untouched and remain valid. Reversible with a single DROP COLUMN.
+-- ============================================================================
+
+-- AlterTable
+ALTER TABLE "FreightLoad" ADD COLUMN     "proofOfDeliveryUrl" TEXT;

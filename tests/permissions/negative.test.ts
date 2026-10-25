@@ -22,6 +22,22 @@ import { GET as carrierAppGET } from "@/app/api/carriers/application/route";
 import { PATCH as freightLoadPATCH } from "@/app/api/freight/loads/route";
 import { GET as recruitingProspectsGET } from "@/app/api/recruiting/prospects/route";
 
+// ---------------------------------------------------------------------------
+// BLOCK-06b — VASRUE Digital Media, 24 Oct 2026.
+// Converting the 13 dynamic route handlers to the Next 15 signature
+// (params: Promise<...>) changed their contract, which broke all five call
+// sites in this file: they were passing a plain object where a Promise is now
+// required. The client Fix Pack that introduced the handler change did not
+// update these, so after it the permission suite no longer typechecked.
+//
+// Wrapping in Promise.resolve() is the correct fix rather than loosening the
+// handler types: it exercises the handlers through exactly the contract Next
+// gives them in production. Runtime behaviour is unchanged either way, since
+// `await` on a non-Promise returns the value — which is why this surfaced as a
+// typecheck failure and not a test failure.
+// Test call sites only. No route, guard, schema or application code altered.
+// ---------------------------------------------------------------------------
+
 const FORBIDDEN_SHIPPER_FIELDS = ["carrierLinehaulCents", "carrierFuelSurchargeCents", "carrierAccessorialsCents", "carrierTotalCents", "grossMarginCents", "platformRevenueCents", "processingFeesCents"];
 
 // Deep scan a JSON value for any forbidden key.
@@ -67,7 +83,7 @@ describe("N3 — dispatcher blocked from a non-granted carrier", () => {
     const owner = await makeUser("CARRIER");
     const carrier = await makeCarrier(owner.id);
     const d = await makeUser("DISPATCHER"); // no grant created
-    const res = await dispatcherLoadsGET(authedRequest(d.jwt, `/api/dispatcher/carriers/${carrier.id}/loads`), { params: { carrierId: carrier.id } });
+    const res = await dispatcherLoadsGET(authedRequest(d.jwt, `/api/dispatcher/carriers/${carrier.id}/loads`), { params: Promise.resolve({ carrierId: carrier.id }) });
     expect(res.status).toBe(403);
   });
 });
@@ -81,7 +97,7 @@ describe("N4 — VIEW_LOADS alone cannot update status", () => {
     const load = await makeLoad({ assignedCarrierId: carrier.id, status: "DISPATCHED" });
     const res = await dispatcherStatusPATCH(
       authedRequest(d.jwt, `/api/dispatcher/loads/${load.id}/status`, { method: "PATCH", body: JSON.stringify({ toStatus: "AT_PICKUP" }) }),
-      { params: { loadId: load.id } },
+      { params: Promise.resolve({ loadId: load.id }) },
     );
     expect(res.status).toBe(403);
   });
@@ -104,7 +120,7 @@ describe("N6 — shipper response contains no carrier-pay/margin fields", () => 
   it("serialized shipper load detail omits all forbidden pricing keys", async () => {
     const shipper = await makeUser("CUSTOMER");
     const load = await makeLoad({ shipperUserId: shipper.id, status: "IN_TRANSIT" });
-    const res = await shipperLoadDetailGET(authedRequest(shipper.jwt, `/api/shipper/loads/${load.id}`), { params: { loadId: load.id } });
+    const res = await shipperLoadDetailGET(authedRequest(shipper.jwt, `/api/shipper/loads/${load.id}`), { params: Promise.resolve({ loadId: load.id }) });
     expect(res.status).toBe(200);
     const body = await bodyOf(res);
     const found = containsForbiddenKey(body, FORBIDDEN_SHIPPER_FIELDS);
@@ -118,7 +134,7 @@ describe("N7 — carrier identity hidden before allowed dispatch stage", () => {
     const carrierOwner = await makeUser("CARRIER");
     const carrier = await makeCarrier(carrierOwner.id, { legalBusinessName: "Secret Carrier LLC" });
     const load = await makeLoad({ shipperUserId: shipper.id, assignedCarrierId: carrier.id, status: "OFFERED" });
-    const res = await shipperLoadDetailGET(authedRequest(shipper.jwt, `/api/shipper/loads/${load.id}`), { params: { loadId: load.id } });
+    const res = await shipperLoadDetailGET(authedRequest(shipper.jwt, `/api/shipper/loads/${load.id}`), { params: Promise.resolve({ loadId: load.id }) });
     const body = await bodyOf(res);
     expect(body.carrierName ?? null).toBeNull();
     expect(JSON.stringify(body).includes("Secret Carrier LLC")).toBe(false);
@@ -128,7 +144,7 @@ describe("N7 — carrier identity hidden before allowed dispatch stage", () => {
     const carrierOwner = await makeUser("CARRIER");
     const carrier = await makeCarrier(carrierOwner.id, { legalBusinessName: "Visible Carrier LLC" });
     const load = await makeLoad({ shipperUserId: shipper.id, assignedCarrierId: carrier.id, status: "DISPATCHED" });
-    const res = await shipperLoadDetailGET(authedRequest(shipper.jwt, `/api/shipper/loads/${load.id}`), { params: { loadId: load.id } });
+    const res = await shipperLoadDetailGET(authedRequest(shipper.jwt, `/api/shipper/loads/${load.id}`), { params: Promise.resolve({ loadId: load.id }) });
     const body = await bodyOf(res);
     expect(body.carrierName).toBe("Visible Carrier LLC");
   });

@@ -1,3 +1,17 @@
+// ---------------------------------------------------------------------------
+// BLOCK-06 — VASRUE Digital Media, 24 October 2026.
+// Next.js 15 made dynamic-route `params` a Promise. This file still used the
+// Next 14 object form, which no longer satisfies the route-handler constraint
+// Next generates into .next/types, so `next build` halted here.
+//
+// Note for anyone re-running the gate: `tsc --noEmit` does NOT catch this.
+// The constraint only exists once Next has generated its route types, so a
+// clean typecheck says nothing about it — only a real build does.
+//
+// The conversion is mechanical: Promise-typed params, await once at the top of
+// the handler, then use the destructured value. No auth check, guard, query or
+// response shape is altered by this change.
+// ---------------------------------------------------------------------------
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -21,12 +35,13 @@ const schema = z.object({ toStatus: z.string().min(1), reason: z.string().max(10
 // states like INVOICED/PAID, which are not dispatcher concerns).
 const DISPATCHER_ALLOWED_TARGETS = new Set(["AT_PICKUP", "LOADED", "IN_TRANSIT", "AT_DELIVERY", "DELIVERED", "POD_PENDING", "EXCEPTION"]);
 
-export async function PATCH(request: Request, { params }: { params: { loadId: string } }) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ loadId: string }> }) {
+  const { loadId } = await params;
   let authed;
   try { authed = await requireDispatcher(request); }
   catch (e) { if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status }); throw e; }
 
-  const load = await prisma.freightLoad.findUnique({ where: { id: params.loadId }, select: { id: true, status: true, marketId: true, assignedCarrierId: true } });
+  const load = await prisma.freightLoad.findUnique({ where: { id: loadId }, select: { id: true, status: true, marketId: true, assignedCarrierId: true } });
   if (!load) return NextResponse.json({ error: "Load not found." }, { status: 404 });
   if (!load.assignedCarrierId) return NextResponse.json({ error: "Load has no assigned carrier." }, { status: 409 });
 

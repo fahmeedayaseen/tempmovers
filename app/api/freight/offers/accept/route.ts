@@ -88,7 +88,10 @@ export async function POST(request: Request) {
       return { ok: true };
     }, { isolationLevel: "Serializable" });
 
-    if ("conflict" in result) return NextResponse.json({ error: result.conflict.message, code: result.conflict.code }, { status: 409 });
+    // VASRUE Digital Media — BLOCK-05, 24 Oct 2026. The `in` operator does not
+    // narrow a union whose members carry `conflict?: undefined`, so result.conflict
+    // stayed possibly-undefined. A truthiness check narrows it correctly.
+    if (result.conflict) return NextResponse.json({ error: result.conflict.message, code: result.conflict.code }, { status: 409 });
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "error";

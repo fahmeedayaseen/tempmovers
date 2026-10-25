@@ -1,3 +1,8 @@
+
+// BLOCK-05 — VASRUE Digital Media, 24 Oct 2026.
+// MarketStage was renamed; CONTROLLED_LAUNCH no longer exists. The value used
+// here is not a guess: prisma/manual/market_stage_reconcile.sql, written by
+// the client, documents the intended mapping as CONTROLLED_LAUNCH -> SOFT_LAUNCH.
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -18,7 +23,7 @@ async function main() {
   const indianapolis = await prisma.launchMarket.upsert({
     where: { marketCode: "INDY" },
     update: {
-      countryCode: "US", timezone: "America/Indiana/Indianapolis", stage: "CONTROLLED_LAUNCH",
+      countryCode: "US", timezone: "America/Indiana/Indianapolis", stage: "SOFT_LAUNCH",
       publicBookingEnabled: true, workerRecruitingEnabled: true, freightEnabled: true,
       centerLat: 39.7684, centerLng: -86.1581, defaultRadiusMiles: 30,
     },
@@ -28,7 +33,7 @@ async function main() {
       state: "IN",
       countryCode: "US",
       timezone: "America/Indiana/Indianapolis",
-      stage: "CONTROLLED_LAUNCH",
+      stage: "SOFT_LAUNCH",
       publicBookingEnabled: true,
       workerRecruitingEnabled: true,
       freightEnabled: true,

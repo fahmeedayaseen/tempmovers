@@ -154,11 +154,13 @@ enum AssignmentStatus {
   NO_SHOW
 }
 
-/** The four customer posting modes for a moving job — freight's
- *  equivalent concept is expressed through the existing RouteVisibility
- *  enum plus CarrierRouteInvitation, rather than a second, parallel
- *  enum, since freight already had a working visibility/invitation
- *  mechanism this round is extending, not replacing. */
+/**
+ * The four customer posting modes for a moving job — freight's
+ * equivalent concept is expressed through the existing RouteVisibility
+ * enum plus CarrierRouteInvitation, rather than a second, parallel
+ * enum, since freight already had a working visibility/invitation
+ * mechanism this round is extending, not replacing.
+ */
 enum JobPostingMode {
   OPEN_MARKETPLACE
   PREFERRED_NETWORK_FIRST
@@ -190,19 +192,23 @@ enum PayoutStatus {
   REVERSED
 }
 
-/** Status of the customer's tip payment itself — separate from
- *  TipAllocation's status, which tracks each worker's share being
- *  transferred out and reuses PayoutStatus for that, since transferring
- *  a tip allocation to a worker is mechanically the same operation as
- *  any other payout. */
+/**
+ * Status of the customer's tip payment itself — separate from
+ * TipAllocation's status, which tracks each worker's share being
+ * transferred out and reuses PayoutStatus for that, since transferring
+ * a tip allocation to a worker is mechanically the same operation as
+ * any other payout.
+ */
 enum TipStatus {
   PROCESSING
   SUCCEEDED
-  /** Payment was captured, but the worker split/allocation could not be
-   *  completed (e.g. the job's approved-assignment eligibility changed
-   *  between charge and webhook, or a database error during allocation
-   *  creation). Money was collected; it has NOT reached any worker yet.
-   *  Recoverable via POST /api/admin/tips/[tipId]/retry-allocation. */
+  /**
+   * Payment was captured, but the worker split/allocation could not be
+   * completed (e.g. the job's approved-assignment eligibility changed
+   * between charge and webhook, or a database error during allocation
+   * creation). Money was collected; it has NOT reached any worker yet.
+   * Recoverable via POST /api/admin/tips/[tipId]/retry-allocation.
+   */
   PAID_UNALLOCATED
   FAILED
 }
@@ -230,8 +236,6 @@ enum DriverFeeModel {
   HOURLY
   PERCENTAGE_CAPPED
 }
-
-
 
 enum PartnerType {
   PROPERTY_MANAGER
@@ -306,123 +310,132 @@ enum UrgentFeeMode {
 }
 
 model User {
-  id            String        @id @default(cuid())
-  email         String        @unique
-  passwordHash  String?
-  firstName     String
-  lastName      String
-  phone         String?
-  role          UserRole
-  status        AccountStatus @default(PENDING)
-  termsAcceptedAt DateTime?
-  phoneVerifiedAt DateTime?
-  smsOptOutAt     DateTime?
-  emailSuppressedAt  DateTime?
+  id                    String          @id @default(cuid())
+  email                 String          @unique
+  passwordHash          String?
+  firstName             String
+  lastName              String
+  phone                 String?
+  role                  UserRole
+  status                AccountStatus   @default(PENDING)
+  termsAcceptedAt       DateTime?
+  phoneVerifiedAt       DateTime?
+  smsOptOutAt           DateTime?
+  emailSuppressedAt     DateTime?
   emailSuppressedReason String?
-  marketingConsent Boolean @default(false)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  requestedRefunds PaymentRefund[]
+  marketingConsent      Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  requestedRefunds      PaymentRefund[]
 
-  customerProfile CustomerProfile?
-  workerProfile   WorkerProfile?
-  adminProfile    AdminProfile?
-  notifications   Notification[]
-  auditLogs       AuditLog[] @relation("ActorAuditLogs")
-  bonusAwards     BonusAward[]
-  bonusAwardsApproved BonusAward[] @relation("BonusApprover")
-  partnerMemberships PartnerMember[]
-  postedLoads     CarrierRoute[] @relation("PostedLoads")
-  sessions        Session[]
-  adminAssignments AdminAssignment[]
-  carrier         Carrier?
-  consents        UserConsent[]
+  customerProfile     CustomerProfile?
+  workerProfile       WorkerProfile?
+  adminProfile        AdminProfile?
+  notifications       Notification[]
+  auditLogs           AuditLog[]           @relation("ActorAuditLogs")
+  bonusAwards         BonusAward[]
+  bonusAwardsApproved BonusAward[]         @relation("BonusApprover")
+  partnerMemberships  PartnerMember[]
+  postedLoads         CarrierRoute[]       @relation("PostedLoads")
+  sessions            Session[]
+  adminAssignments    AdminAssignment[]
+  carrier             Carrier?
+  consents            UserConsent[]
   invitationTemplates InvitationTemplate[]
-  favoriteWorkers FavoriteWorker[]
-  savedSearches   SavedSearch[]
-  portfolioReports PortfolioReport[]
+  favoriteWorkers     FavoriteWorker[]
+  savedSearches       SavedSearch[]
+  portfolioReports    PortfolioReport[]
 }
 
 model CustomerProfile {
-  id               String       @id @default(cuid())
-  userId           String       @unique
-  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type             CustomerType @default(INDIVIDUAL)
-  companyName      String?
-  stripeCustomerId String?      @unique
-  defaultAddressId String?
-  addresses        Address[]
-  jobs             Job[]
+  id                   String                @id @default(cuid())
+  userId               String                @unique
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                 CustomerType          @default(INDIVIDUAL)
+  companyName          String?
+  stripeCustomerId     String?               @unique
+  defaultAddressId     String?
+  addresses            Address[]
+  jobs                 Job[]
   partnerOrganizations PartnerOrganization[]
-  reviews          Review[]
-  tips             Tip[]
+  reviews              Review[]
+  tips                 Tip[]
 }
 
 model WorkerProfile {
-  id                       String             @id @default(cuid())
-  userId                   String             @unique
-  user                     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workerType               WorkerType
-  bio                      String?
-  hourlyEarningsCents      Int                @default(3000)
-  serviceRadiusMiles       Int                @default(30)
-  homeLatitude             Decimal?           @db.Decimal(10, 7)
-  homeLongitude            Decimal?           @db.Decimal(10, 7)
-  homeZip                   String?
-  acceptingJobs            Boolean            @default(false)
-  completedJobs            Int                @default(0)
-  firstCompletedJobAt      DateTime?
-  subscriptionWaivedUntilFirstJob Boolean      @default(true)
-  subscriptionActivatedAt  DateTime?
-  backgroundCheckStatus    String              @default("PENDING")
-  identityVerification     String              @default("PENDING")
-  stripeAccountId          String?             @unique
-  stripeChargesEnabled     Boolean             @default(false)
-  stripePayoutsEnabled     Boolean             @default(false)
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // BLOCK-05 — VASRUE Digital Media, 24 Oct 2026.
+  // The admin subscriptions route orders by createdAt, which this model never
+  // declared. Every other model in this schema carries the same field with the
+  // same default, so the omission here is an oversight rather than a decision.
+  // Note for the record: rows that already exist take the migration timestamp,
+  // which is acceptable only because no WorkerProfile rows exist in production
+  // yet. If that changes before this is applied, backfill from User.createdAt.
+  createdAt                       DateTime                 @default(now())
+  user                            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workerType                      WorkerType
+  bio                             String?
+  hourlyEarningsCents             Int                      @default(3000)
+  serviceRadiusMiles              Int                      @default(30)
+  homeLatitude                    Decimal?                 @db.Decimal(10, 7)
+  homeLongitude                   Decimal?                 @db.Decimal(10, 7)
+  homeZip                         String?
+  acceptingJobs                   Boolean                  @default(false)
+  completedJobs                   Int                      @default(0)
+  firstCompletedJobAt             DateTime?
+  subscriptionWaivedUntilFirstJob Boolean                  @default(true)
+  subscriptionActivatedAt         DateTime?
+  backgroundCheckStatus           String                   @default("PENDING")
+  identityVerification            String                   @default("PENDING")
+  stripeAccountId                 String?                  @unique
+  stripeChargesEnabled            Boolean                  @default(false)
+  stripePayoutsEnabled            Boolean                  @default(false)
   // Separate from stripeAccountId: that's the worker's Connect account for
   // RECEIVING payouts. This is a plain Stripe Customer object for the
   // worker being CHARGED their own membership fee — two different Stripe
   // object types serving opposite money directions for the same person.
-  stripeCustomerId         String?             @unique
-  subscriptionStatus       SubscriptionStatus  @default(INCOMPLETE)
-  subscriptionPlan         SubscriptionPlan?
-  stripeSubscriptionId     String?             @unique
-  fleetVehicleAllowance    Int                 @default(1)
-  subscriptionCurrentEnd   DateTime?
-  availability             Availability[]
-  skills                   WorkerSkill[]
-  certifications           Certification[]
-  languages                WorkerLanguage[]
-  favoritedBy              FavoriteWorker[]
-  portfolioMedia           PortfolioMedia[]
-  assignments              Assignment[]
-  vehicles                 Vehicle[]
-  payouts                  Payout[]
-  tipAllocations           TipAllocation[]
-  reviewsReceived          Review[]            @relation("WorkerReviews")
+  stripeCustomerId                String?                  @unique
+  subscriptionStatus              SubscriptionStatus       @default(INCOMPLETE)
+  subscriptionPlan                SubscriptionPlan?
+  stripeSubscriptionId            String?                  @unique
+  fleetVehicleAllowance           Int                      @default(1)
+  subscriptionCurrentEnd          DateTime?
+  availability                    Availability[]
+  skills                          WorkerSkill[]
+  certifications                  Certification[]
+  languages                       WorkerLanguage[]
+  favoritedBy                     FavoriteWorker[]
+  portfolioMedia                  PortfolioMedia[]
+  assignments                     Assignment[]
+  vehicles                        Vehicle[]
+  payouts                         Payout[]
+  tipAllocations                  TipAllocation[]
+  reviewsReceived                 Review[]                 @relation("WorkerReviews")
   // Recalculated by lib/reviews.ts on every review submission/moderation
   // action — never written directly anywhere else, so these can't drift
   // from what PUBLISHED reviews actually say.
-  ratingAverage            Float               @default(0)
-  ratingCount              Int                 @default(0)
-  fiveStarReviewCount      Int                 @default(0)
-  bonusAwards              BonusAward[]
-  preferredNetworks        PreferredWorker[]
-  assignedLoads            CarrierRoute[]
-  settlements              Settlement[]
-  workerMarkets            WorkerMarket[]
-  workerTerritories        WorkerTerritory[]
-  routeInvitations         CarrierRouteInvitation[]
-  documents                WorkerDocument[]
-  backgroundChecks         BackgroundCheck[]
-  screeningCharges         ScreeningCharge[]
-  compliance               WorkerCompliance?
-  insurancePolicies        InsurancePolicy[]
-  vehicleVerificationStatus    String @default("PENDING")
-  insuranceVerificationStatus  String @default("PENDING")
-  dotMcVerificationStatus      String @default("NOT_REQUIRED")
-  carrierVerification          CarrierVerification?
-  stripeConnectOnboarded       Boolean @default(false)
+  ratingAverage                   Float                    @default(0)
+  ratingCount                     Int                      @default(0)
+  fiveStarReviewCount             Int                      @default(0)
+  bonusAwards                     BonusAward[]
+  preferredNetworks               PreferredWorker[]
+  assignedLoads                   CarrierRoute[]
+  settlements                     Settlement[]
+  workerMarkets                   WorkerMarket[]
+  workerTerritories               WorkerTerritory[]
+  routeInvitations                CarrierRouteInvitation[]
+  documents                       WorkerDocument[]
+  backgroundChecks                BackgroundCheck[]
+  screeningCharges                ScreeningCharge[]
+  compliance                      WorkerCompliance?
+  insurancePolicies               InsurancePolicy[]
+  vehicleVerificationStatus       String                   @default("PENDING")
+  insuranceVerificationStatus     String                   @default("PENDING")
+  dotMcVerificationStatus         String                   @default("NOT_REQUIRED")
+  carrierVerification             CarrierVerification?
+  stripeConnectOnboarded          Boolean                  @default(false)
 
   // Holistic onboarding/review lifecycle — distinct from the granular
   // per-document strings above (those track individual checks; these track
@@ -430,9 +443,9 @@ model WorkerProfile {
   // from User.status (AccountStatus) which is a platform-wide account
   // state, not a worker-specific operational one — a worker can be a fine
   // User account (not suspended) while still PENDING here.
-  onboardingStatus       OnboardingStatus @default(INCOMPLETE)
+  onboardingStatus          OnboardingStatus         @default(INCOMPLETE)
   overallVerificationStatus WorkerVerificationStatus @default(PENDING)
-  operationalStatus      WorkerOperationalStatus @default(PENDING)
+  operationalStatus         WorkerOperationalStatus  @default(PENDING)
 
   legalName       String?
   displayName     String?
@@ -455,7 +468,7 @@ model WorkerProfile {
   // when a referral code is present (see POST /api/auth/register).
   referredByWorkerId String?
   referredByWorker   WorkerProfile?  @relation("WorkerReferrals", fields: [referredByWorkerId], references: [id], onDelete: SetNull)
-  referredWorkers     WorkerProfile[] @relation("WorkerReferrals")
+  referredWorkers    WorkerProfile[] @relation("WorkerReferrals")
 
   submittedAt     DateTime?
   approvedAt      DateTime?
@@ -488,28 +501,28 @@ enum WorkerOperationalStatus {
 }
 
 model AdminProfile {
-  id     String @id @default(cuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String  @id @default(cuid())
+  userId String  @unique
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   title  String?
 }
 
 model Address {
-  id          String           @id @default(cuid())
-  customerId  String?
-  customer    CustomerProfile? @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  label       String?
-  line1       String
-  line2       String?
-  city        String
-  state       String
-  postalCode  String
-  country     String           @default("US")
-  latitude    Decimal?         @db.Decimal(10, 7)
-  longitude   Decimal?         @db.Decimal(10, 7)
-  placeId     String?
-  geocodedAt  DateTime?
-  jobs        Job[]
+  id         String           @id @default(cuid())
+  customerId String?
+  customer   CustomerProfile? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String?
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  country    String           @default("US")
+  latitude   Decimal?         @db.Decimal(10, 7)
+  longitude  Decimal?         @db.Decimal(10, 7)
+  placeId    String?
+  geocodedAt DateTime?
+  jobs       Job[]
 }
 
 model Availability {
@@ -519,6 +532,7 @@ model Availability {
   startsAt    DateTime
   endsAt      DateTime
   isAvailable Boolean       @default(true)
+
   @@index([workerId, startsAt, endsAt])
 }
 
@@ -534,14 +548,16 @@ model WorkerSkill {
   skillId  String
   worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
   skill    Skill         @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
   @@id([workerId, skillId])
 }
 
 model JobSkill {
   jobId   String
   skillId String
-  job     Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  skill   Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  job     Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
   @@id([jobId, skillId])
 }
 
@@ -556,17 +572,17 @@ model JobSkill {
 // this is the actual invite/accept/decline/expire workflow that makes
 // PRIVATE_CONFIDENTIAL visibility mean something.
 model CarrierRouteInvitation {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   carrierRouteId String
   carrierRoute   CarrierRoute @relation(fields: [carrierRouteId], references: [id], onDelete: Cascade)
 
   workerId String
   worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
-  status       RouteInvitationStatus @default(PENDING)
-  expiresAt    DateTime?
-  createdAt    DateTime @default(now())
-  respondedAt  DateTime?
+  status      RouteInvitationStatus @default(PENDING)
+  expiresAt   DateTime?
+  createdAt   DateTime              @default(now())
+  respondedAt DateTime?
 
   @@unique([carrierRouteId, workerId])
   @@index([workerId, status])
@@ -606,16 +622,16 @@ model InvitationTemplate {
 // the string-status convention used elsewhere on WorkerProfile
 // (identityVerification etc.) rather than a new enum, for consistency.
 model Certification {
-  id         String    @id @default(cuid())
-  workerId   String
-  worker     WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  name       String
-  issuer     String?
-  issuedAt   DateTime?
-  expiresAt  DateTime?
-  status     String    @default("SELF_REPORTED") // SELF_REPORTED | VERIFIED | REJECTED
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id        String        @id @default(cuid())
+  workerId  String
+  worker    WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  name      String
+  issuer    String?
+  issuedAt  DateTime?
+  expiresAt DateTime?
+  status    String        @default("SELF_REPORTED") // SELF_REPORTED | VERIFIED | REJECTED
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
   @@index([workerId])
 }
@@ -641,12 +657,12 @@ model WorkerLanguage {
 // user's private star, with no priority and no partner scope. Keeping
 // them separate avoids overloading the Phase 2 roster semantics.
 model FavoriteWorker {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workerId   String
-  worker     WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workerId  String
+  worker    WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
 
   @@unique([userId, workerId])
   @@index([userId, createdAt])
@@ -719,37 +735,37 @@ enum PortfolioReportReason {
 }
 
 model PortfolioMedia {
-  id           String   @id @default(cuid())
-  workerId     String
-  worker       WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  type         PortfolioMediaType @default(IMAGE)
-  title        String?
-  description  String?
-  categoryId   String?
-  category     PortfolioCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  id          String             @id @default(cuid())
+  workerId    String
+  worker      WorkerProfile      @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  type        PortfolioMediaType @default(IMAGE)
+  title       String?
+  description String?
+  categoryId  String?
+  category    PortfolioCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   // Private storage identifiers — never exposed in a public response.
-  storageKey   String  @unique
-  thumbnailKey String?
+  storageKey    String  @unique
+  thumbnailKey  String?
   publicAssetId String? // optional CDN id, not a raw bucket URL
 
-  mimeType     String
-  fileSize     Int
-  width        Int?
-  height       Int?
+  mimeType String
+  fileSize Int
+  width    Int?
+  height   Int?
 
-  status          PortfolioModerationStatus @default(DRAFT)
-  processingStatus PortfolioProcessingStatus @default(NOT_REQUIRED)
-  processingError String?  // internal — last processing failure reason
+  status                  PortfolioModerationStatus @default(DRAFT)
+  processingStatus        PortfolioProcessingStatus @default(NOT_REQUIRED)
+  processingError         String? // internal — last processing failure reason
   // Phase 5.5B stale-worker recovery: populated when a worker claims a
   // job, so a recovery task can detect PROCESSING rows whose worker died
   // and retry or fail them. processingAttempts bounds infinite retries.
   processingStartedAt     DateTime?
   processedAt             DateTime?
-  processingAttempts      Int      @default(0)
+  processingAttempts      Int                       @default(0)
   lastProcessingAttemptAt DateTime?
-  rejectionReason String?  // worker-visible
-  moderationNote  String?  // internal only, never public
+  rejectionReason         String? // worker-visible
+  moderationNote          String? // internal only, never public
 
   isPrimary    Boolean @default(false)
   displayOrder Int     @default(0)
@@ -763,11 +779,11 @@ model PortfolioMedia {
   removedAt    DateTime?
   removedById  String?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  deletedAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  reports      PortfolioReport[]
+  reports PortfolioReport[]
 
   @@index([workerId, status, displayOrder])
   @@index([status, submittedAt])
@@ -775,30 +791,30 @@ model PortfolioMedia {
 }
 
 model PortfolioCategory {
-  id           String  @id @default(cuid())
+  id           String   @id @default(cuid())
   name         String
-  slug         String  @unique
+  slug         String   @unique
   description  String?
-  isActive     Boolean @default(true)
-  displayOrder Int     @default(0)
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  media        PortfolioMedia[]
+  media PortfolioMedia[]
 }
 
 model PortfolioReport {
-  id             String   @id @default(cuid())
+  id             String                @id @default(cuid())
   mediaId        String
-  media          PortfolioMedia @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  media          PortfolioMedia        @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   reporterUserId String
-  reporter       User     @relation(fields: [reporterUserId], references: [id], onDelete: Cascade)
+  reporter       User                  @relation(fields: [reporterUserId], references: [id], onDelete: Cascade)
   reason         PortfolioReportReason
   details        String?
   status         PortfolioReportStatus @default(OPEN)
   reviewedById   String?
   resolutionNote String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime              @default(now())
   reviewedAt     DateTime?
 
   @@index([mediaId, status])
@@ -811,7 +827,7 @@ model PortfolioReport {
 // private object-storage provider with signed URLs (see README) — this
 // model is ready to receive that fileUrl once one exists.
 model WorkerDocument {
-  id       String @id @default(cuid())
+  id       String        @id @default(cuid())
   workerId String
   worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
@@ -819,7 +835,7 @@ model WorkerDocument {
   fileUrl     String
   status      DocumentReviewStatus @default(PENDING)
   expiresAt   DateTime?
-  submittedAt DateTime @default(now())
+  submittedAt DateTime             @default(now())
   reviewedAt  DateTime?
   reviewedBy  String?
   reason      String?
@@ -852,12 +868,12 @@ enum DocumentReviewStatus {
 // from where" for actual legal defensibility, and supports more consent
 // types than just terms/marketing without more User columns.
 model UserConsent {
-  id         String @id @default(cuid())
+  id         String      @id @default(cuid())
   userId     String
-  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   type       ConsentType
   version    String
-  acceptedAt DateTime @default(now())
+  acceptedAt DateTime    @default(now())
   ipAddress  String?
   userAgent  String?
 
@@ -875,29 +891,30 @@ enum ConsentType {
 // over time — pinning to a Prisma enum would require a migration every
 // time Checkr changes their API rather than just accepting the new string.
 model BackgroundCheck {
-  id           String   @id @default(cuid())
-  workerId     String
-  worker       WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  id       String        @id @default(cuid())
+  workerId String
+  worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
-  provider     String   @default("CHECKR")
+  provider      String    @default("CHECKR")
   // Required, not optional: the whole point of this schema revision is that
   // every invitation is now tied to a real Checkr candidate_id, created (or
   // reused) BEFORE the invitation — see lib/screening/start-checkr.ts. The
   // old direct candidate_email invitation call never produced a candidate
   // ID to store, so this had to stay nullable before; it doesn't anymore.
-  candidateId  String
-  invitationId String?  @unique
-  reportId     String?  @unique
+  candidateId   String
+  invitationId  String?   @unique
+  reportId      String?   @unique
   invitationUrl String?
-  packageSlug  String
-  status       String
-  result       String?
-  completedAt  DateTime?
-  rawResponse  Json?
+  packageSlug   String
+  status        String
+  result        String?
+  completedAt   DateTime?
+  rawResponse   Json?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   screeningCharge ScreeningCharge?
+
   @@index([workerId, status])
   @@index([candidateId])
 }
@@ -909,19 +926,19 @@ model BackgroundCheck {
 // app/api/stripe/worker-subscription/route.ts, since Afterpay doesn't
 // support Checkout subscription mode at all.
 model ScreeningCharge {
-  id                String   @id @default(cuid())
+  id                String           @id @default(cuid())
   workerId          String
-  worker            WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  backgroundCheckId String?  @unique
+  worker            WorkerProfile    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  backgroundCheckId String?          @unique
   backgroundCheck   BackgroundCheck? @relation(fields: [backgroundCheckId], references: [id], onDelete: SetNull)
 
   packageSlug            String
-  currency               String  @default("usd")
+  currency               String                    @default("usd")
   baseAmountCents        Int
-  passThroughAmountCents Int     @default(0)
+  passThroughAmountCents Int                       @default(0)
   totalAmountCents       Int
   paymentProvider        ScreeningPaymentProvider?
-  status                 ScreeningChargeStatus @default(QUOTED)
+  status                 ScreeningChargeStatus     @default(QUOTED)
 
   stripeCheckoutSessionId String? @unique
   stripePaymentIntentId   String? @unique
@@ -931,12 +948,12 @@ model ScreeningCharge {
   stripeChargeId          String? @unique
   stripeRefundId          String? @unique
 
-  feeDisclosureVersion     String
-  feeDisclosureAcceptedAt  DateTime?
-  fcraAuthorizationAt      DateTime?
-  paidAt                   DateTime?
-  refundedAt               DateTime?
-  screeningOrderedAt       DateTime?
+  feeDisclosureVersion    String
+  feeDisclosureAcceptedAt DateTime?
+  fcraAuthorizationAt     DateTime?
+  paidAt                  DateTime?
+  refundedAt              DateTime?
+  screeningOrderedAt      DateTime?
 
   // Sponsorship / admin override trail — set together whenever
   // paymentProvider becomes PLATFORM_SPONSORED, per section 12 of the
@@ -946,6 +963,7 @@ model ScreeningCharge {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@index([workerId, status])
 }
 
@@ -989,22 +1007,22 @@ enum ScreeningPaymentProvider {
 // after Stripe confirms — not optimistically from the capture route,
 // which only knows what it asked for, not what was actually settled.
 model PaymentTransaction {
-  id                      String   @id @default(cuid())
-  jobId                   String?
-  job                     Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  loadId                  String?
-  load                    CarrierRoute? @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  stripePaymentIntentId   String
-  stripeChargeId          String   @unique
-  amountReceivedCents     Int
-  currency                String   @default("usd")
-  paymentMethodBrand      String?
-  paymentMethodLast4      String?
-  receiptUrl              String?
-  refundedAmountCents     Int      @default(0)
-  refunds                 PaymentRefund[]
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  id                    String          @id @default(cuid())
+  jobId                 String?
+  job                   Job?            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  loadId                String?
+  load                  CarrierRoute?   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  stripePaymentIntentId String
+  stripeChargeId        String          @unique
+  amountReceivedCents   Int
+  currency              String          @default("usd")
+  paymentMethodBrand    String?
+  paymentMethodLast4    String?
+  receiptUrl            String?
+  refundedAmountCents   Int             @default(0)
+  refunds               PaymentRefund[]
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
 
   @@index([jobId])
   @@index([loadId])
@@ -1017,26 +1035,26 @@ model PaymentTransaction {
 // cumulative total on PaymentTransaction), and no protection against two
 // concurrent refund requests over-claiming the same refundable balance.
 model PaymentRefund {
-  id                   String        @id @default(cuid())
+  id                   String             @id @default(cuid())
   paymentTransactionId String
   paymentTransaction   PaymentTransaction @relation(fields: [paymentTransactionId], references: [id], onDelete: Restrict)
 
-  stripeRefundId       String?       @unique
-  idempotencyKey       String        @unique
-  amountCents          Int
-  currency             String        @default("usd")
-  status               RefundStatus  @default(PROCESSING)
-  reason               String
-  failureCode          String?
-  failureMessage       String?
+  stripeRefundId String?      @unique
+  idempotencyKey String       @unique
+  amountCents    Int
+  currency       String       @default("usd")
+  status         RefundStatus @default(PROCESSING)
+  reason         String
+  failureCode    String?
+  failureMessage String?
 
-  requestedByUserId    String
-  requestedByUser      User          @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  requestedByUserId String
+  requestedByUser   User   @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
 
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  succeededAt          DateTime?
-  failedAt             DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  succeededAt DateTime?
+  failedAt    DateTime?
 
   @@index([paymentTransactionId, createdAt])
   @@index([requestedByUserId, createdAt])
@@ -1051,14 +1069,14 @@ enum RefundStatus {
 }
 
 model PaymentAttempt {
-  id                    String   @id @default(cuid())
+  id                    String                        @id @default(cuid())
   jobId                 String?
-  job                   Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job                   Job?                          @relation(fields: [jobId], references: [id], onDelete: Cascade)
   loadId                String?
-  load                  CarrierRoute? @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  load                  CarrierRoute?                 @relation(fields: [loadId], references: [id], onDelete: Cascade)
   attemptNumber         Int
-  idempotencyKey        String   @unique
-  stripePaymentIntentId String?  @unique
+  idempotencyKey        String                        @unique
+  stripePaymentIntentId String?                       @unique
   // Tracks THIS ROW's own claim/creation lifecycle — separate from
   // paymentStatus, which tracks the actual Stripe PaymentIntent state.
   // PROCESSING means "claimed, Stripe call not yet confirmed"; a request
@@ -1066,13 +1084,13 @@ model PaymentAttempt {
   // leaves this in PROCESSING, which is what identifies it as
   // retryable/investigable rather than silently ambiguous.
   operationStatus       PaymentAttemptOperationStatus @default(PROCESSING)
-  paymentStatus         PaymentStatus @default(REQUIRES_PAYMENT_METHOD)
+  paymentStatus         PaymentStatus                 @default(REQUIRES_PAYMENT_METHOD)
   authorizedAt          DateTime?
   canceledAt            DateTime?
   cancelReason          String?
   failureReason         String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
 
   @@unique([jobId, attemptNumber])
   @@unique([loadId, attemptNumber])
@@ -1088,12 +1106,12 @@ enum PaymentAttemptOperationStatus {
 }
 
 model DetentionCharge {
-  id                    String   @id @default(cuid())
+  id                    String                   @id @default(cuid())
   loadId                String
-  load                  CarrierRoute @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  load                  CarrierRoute             @relation(fields: [loadId], references: [id], onDelete: Cascade)
   amountCents           Int
-  stripePaymentIntentId String   @unique
-  paymentStatus         PaymentStatus @default(REQUIRES_PAYMENT_METHOD)
+  stripePaymentIntentId String                   @unique
+  paymentStatus         PaymentStatus            @default(REQUIRES_PAYMENT_METHOD)
   approvedById          String
   approvedAt            DateTime
   paidAt                DateTime?
@@ -1104,8 +1122,8 @@ model DetentionCharge {
   // by a pending settlement" now, via its unique detentionChargeId.
   includedInPayoutAt    DateTime?
   settlementLine        SettlementDetentionLine?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
 
   @@index([loadId, paymentStatus])
 }
@@ -1117,14 +1135,14 @@ model DetentionCharge {
 // ever, which is what makes double-settlement of the same charge
 // impossible at the database level rather than just application logic.
 model SettlementDetentionLine {
-  id                String @id @default(cuid())
+  id                String          @id @default(cuid())
   settlementId      String
-  settlement        Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
-  detentionChargeId String @unique
+  settlement        Settlement      @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  detentionChargeId String          @unique
   detentionCharge   DetentionCharge @relation(fields: [detentionChargeId], references: [id], onDelete: Restrict)
   loadId            String
   amountCents       Int
-  createdAt         DateTime @default(now())
+  createdAt         DateTime        @default(now())
 
   @@index([settlementId])
 }
@@ -1135,24 +1153,24 @@ model SettlementDetentionLine {
 // never change even if the underlying CarrierRoute's own fields are
 // later edited, which is what makes this auditable/disputable.
 model PartnerInvoice {
-  id                 String   @id @default(cuid())
+  id                    String               @id @default(cuid())
   partnerOrganizationId String
-  partnerOrganization PartnerOrganization @relation(fields: [partnerOrganizationId], references: [id], onDelete: Restrict)
-  periodStart        DateTime
-  periodEnd          DateTime
-  status             PartnerInvoiceStatus @default(DRAFT)
-  subtotalCents      Int
-  platformFeeCents   Int
-  totalCents         Int
-  stripeInvoiceId    String?  @unique
-  stripeCustomerId   String?
-  dueDate            DateTime?
-  finalizedAt        DateTime?
-  paidAt             DateTime?
-  voidedAt           DateTime?
-  lines              PartnerInvoiceLine[]
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  partnerOrganization   PartnerOrganization  @relation(fields: [partnerOrganizationId], references: [id], onDelete: Restrict)
+  periodStart           DateTime
+  periodEnd             DateTime
+  status                PartnerInvoiceStatus @default(DRAFT)
+  subtotalCents         Int
+  platformFeeCents      Int
+  totalCents            Int
+  stripeInvoiceId       String?              @unique
+  stripeCustomerId      String?
+  dueDate               DateTime?
+  finalizedAt           DateTime?
+  paidAt                DateTime?
+  voidedAt              DateTime?
+  lines                 PartnerInvoiceLine[]
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   @@index([partnerOrganizationId, status])
 }
@@ -1162,17 +1180,17 @@ model PartnerInvoice {
 // run for an overlapping period can't double-bill a load that's already
 // on an earlier invoice.
 model PartnerInvoiceLine {
-  id                String   @id @default(cuid())
+  id                String         @id @default(cuid())
   partnerInvoiceId  String
   partnerInvoice    PartnerInvoice @relation(fields: [partnerInvoiceId], references: [id], onDelete: Cascade)
-  loadId            String   @unique
-  load              CarrierRoute @relation(fields: [loadId], references: [id], onDelete: Restrict)
+  loadId            String         @unique
+  load              CarrierRoute   @relation(fields: [loadId], references: [id], onDelete: Restrict)
   title             String
   deliveredAt       DateTime?
   grossCarrierCents Int
   platformFeeCents  Int
   lineTotalCents    Int
-  createdAt         DateTime @default(now())
+  createdAt         DateTime       @default(now())
 }
 
 enum PartnerInvoiceStatus {
@@ -1185,17 +1203,17 @@ enum PartnerInvoiceStatus {
 }
 
 model ProcessedCheckrEvent {
-  id            String   @id
+  id            String                      @id
   eventType     String
   candidateId   String?
   reportId      String?
   invitationId  String?
   status        CheckrEventProcessingStatus @default(PENDING_RECONCILIATION)
   rawPayload    Json
-  receivedAt    DateTime @default(now())
+  receivedAt    DateTime                    @default(now())
   processedAt   DateTime?
   reconciledAt  DateTime?
-  attemptCount  Int      @default(0)
+  attemptCount  Int                         @default(0)
   lastAttemptAt DateTime?
   lastError     String?
 
@@ -1232,26 +1250,26 @@ enum ScreeningChargeStatus {
 // job/load acceptance. This is the fuller, role-aware breakdown the
 // opportunity-access policy and admin compliance screens read from.
 model WorkerCompliance {
-  id       String @id @default(cuid())
-  workerId String @unique
+  id       String        @id @default(cuid())
+  workerId String        @unique
   worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
-  identityStatus       ComplianceDecision @default(NOT_STARTED)
-  backgroundStatus     ComplianceDecision @default(NOT_STARTED)
-  licenseStatus        ComplianceDecision @default(NOT_STARTED)
-  mvrStatus            ComplianceDecision @default(NOT_STARTED)
-  insuranceStatus      ComplianceDecision @default(NOT_STARTED)
-  vehicleStatus        ComplianceDecision @default(NOT_STARTED)
-  dotStatus            ComplianceDecision @default(NOT_STARTED)
-  mcStatus             ComplianceDecision @default(NOT_STARTED)
-  cdlStatus            ComplianceDecision @default(NOT_STARTED)
-  adminApprovalStatus  ComplianceDecision @default(NOT_STARTED)
+  identityStatus      ComplianceDecision @default(NOT_STARTED)
+  backgroundStatus    ComplianceDecision @default(NOT_STARTED)
+  licenseStatus       ComplianceDecision @default(NOT_STARTED)
+  mvrStatus           ComplianceDecision @default(NOT_STARTED)
+  insuranceStatus     ComplianceDecision @default(NOT_STARTED)
+  vehicleStatus       ComplianceDecision @default(NOT_STARTED)
+  dotStatus           ComplianceDecision @default(NOT_STARTED)
+  mcStatus            ComplianceDecision @default(NOT_STARTED)
+  cdlStatus           ComplianceDecision @default(NOT_STARTED)
+  adminApprovalStatus ComplianceDecision @default(NOT_STARTED)
 
   approvedAt        DateTime?
   restrictedAt      DateTime?
   restrictionReason String?
   expiresAt         DateTime?
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime  @updatedAt
 }
 
 enum ComplianceDecision {
@@ -1271,11 +1289,11 @@ enum ComplianceDecision {
 // lapse can be detected and enforced automatically, not just self-reported
 // once at onboarding.
 model InsurancePolicy {
-  id               String   @id @default(cuid())
-  workerId         String
-  worker           WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  id       String        @id @default(cuid())
+  workerId String
+  worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
-  provider         String   @default("CERTIFICIAL")
+  provider         String    @default("CERTIFICIAL")
   externalPolicyId String?
   policyType       String
   carrierName      String?
@@ -1288,13 +1306,14 @@ model InsurancePolicy {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@index([workerId, status])
 }
 
 model CarrierVerification {
-  id              String   @id @default(cuid())
-  workerId        String   @unique
-  worker          WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  id       String        @id @default(cuid())
+  workerId String        @unique
+  worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
   usdotNumber     String?
   legalName       String?
@@ -1306,6 +1325,7 @@ model CarrierVerification {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@index([decision, expiresAt])
 }
 
@@ -1324,15 +1344,15 @@ enum CarrierVerificationDecision {
 // ============================================================================
 
 enum CarrierStatus {
-  APPLICATION_STARTED   // account created; cannot receive loads
-  DOCUMENTS_PENDING     // required docs not all uploaded
-  UNDER_REVIEW          // admin compliance review in progress
-  APPROVED              // compliance review passed (NOT yet eligible for loads)
-  ACTIVE                // currently eligible to receive opportunities
-  TEMPORARILY_INACTIVE  // paused by carrier/admin, reversible
-  SUSPENDED             // admin action, not eligible
-  REJECTED              // application denied
-  EXPIRED_DOCUMENTS     // a required doc/insurance lapsed → load-ineligible
+  APPLICATION_STARTED // account created; cannot receive loads
+  DOCUMENTS_PENDING // required docs not all uploaded
+  UNDER_REVIEW // admin compliance review in progress
+  APPROVED // compliance review passed (NOT yet eligible for loads)
+  ACTIVE // currently eligible to receive opportunities
+  TEMPORARILY_INACTIVE // paused by carrier/admin, reversible
+  SUSPENDED // admin action, not eligible
+  REJECTED // application denied
+  EXPIRED_DOCUMENTS // a required doc/insurance lapsed → load-ineligible
 }
 
 enum CarrierPaymentPreference {
@@ -1342,45 +1362,45 @@ enum CarrierPaymentPreference {
 }
 
 model Carrier {
-  id                 String   @id @default(cuid())
+  id          String @id @default(cuid())
   // Owning user (role CARRIER). One carrier company per owning user for now.
-  ownerUserId        String   @unique
-  ownerUser          User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  ownerUserId String @unique
+  ownerUser   User   @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
 
   // Business identity
-  legalBusinessName  String
-  dbaName            String?
-  contactName        String?
-  contactEmail       String?
-  contactPhone       String?
-  businessAddress    String?
-  ein                String?
-  dotNumber          String?
-  mcNumber           String?
-  authorityStatus    String?  // free-form snapshot; authoritative check is CarrierFmcsaCheck
-  authorityAgeMonths Int?
-  homeTerminal       String?
+  legalBusinessName    String
+  dbaName              String?
+  contactName          String?
+  contactEmail         String?
+  contactPhone         String?
+  businessAddress      String?
+  ein                  String?
+  dotNumber            String?
+  mcNumber             String?
+  authorityStatus      String? // free-form snapshot; authoritative check is CarrierFmcsaCheck
+  authorityAgeMonths   Int?
+  homeTerminal         String?
   operatingRadiusMiles Int?
-  numberOfTrucks     Int?     @default(0)
+  numberOfTrucks       Int?    @default(0)
 
   // Payment: ACH/banking details are NOT stored here — they live with the
   // payment provider (Stripe). We keep only a preference + a provider token
   // reference, never raw bank numbers (spec rule #5).
   paymentPreference  CarrierPaymentPreference @default(DIRECT_DEPOSIT)
-  paymentProviderRef String?  // e.g. Stripe connected-account id — NOT bank data
+  paymentProviderRef String? // e.g. Stripe connected-account id — NOT bank data
   // Factoring is modeled as its own profile + payment-assignment records
   // (see CarrierFactoringProfile / PaymentAssignment) rather than inline fields,
   // so payment routing has verification, change-control, and audit.
 
   // Lifecycle
-  status             CarrierStatus @default(APPLICATION_STARTED)
-  statusReason       String?
-  approvedAt         DateTime?
-  activatedAt        DateTime?
+  status       CarrierStatus @default(APPLICATION_STARTED)
+  statusReason String?
+  approvedAt   DateTime?
+  activatedAt  DateTime?
 
   // Market association (recruitment market)
-  marketId           String?
-  market             LaunchMarket? @relation(fields: [marketId], references: [id], onDelete: SetNull)
+  marketId String?
+  market   LaunchMarket? @relation(fields: [marketId], references: [id], onDelete: SetNull)
 
   documents          CarrierDocument[]
   insurancePolicies  CarrierInsurancePolicy[]
@@ -1393,14 +1413,14 @@ model Carrier {
   paymentAssignments PaymentAssignment[]
   factoringReferrals FactoringReferral[]
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  notes            CarrierNote[]
+  dispatcherAccess DispatcherCarrierAccess[]
 
   @@unique([dotNumber])
   @@unique([mcNumber])
   @@index([status, marketId])
-  notes            CarrierNote[]
-  dispatcherAccess DispatcherCarrierAccess[]
 }
 
 enum CarrierDocumentType {
@@ -1412,21 +1432,22 @@ enum CarrierDocumentType {
 }
 
 model CarrierDocument {
-  id           String   @id @default(cuid())
-  carrierId    String
-  carrier      Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  type         CarrierDocumentType
+  id              String              @id @default(cuid())
+  carrierId       String
+  carrier         Carrier             @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  type            CarrierDocumentType
   // Object-storage key only — the file lives in S3, not the DB.
-  storageKey   String
-  fileName     String?
-  uploadedById String
-  verified     Boolean  @default(false)
-  expiresAt    DateTime?
-  createdAt    DateTime @default(now())
-  @@index([carrierId, type])
+  storageKey      String
+  fileName        String?
+  uploadedById    String
+  verified        Boolean             @default(false)
+  expiresAt       DateTime?
+  createdAt       DateTime            @default(now())
   rejectionReason String?
   supersededById  String?
   supersededAt    DateTime?
+
+  @@index([carrierId, type])
 }
 
 enum InsuranceType {
@@ -1436,9 +1457,9 @@ enum InsuranceType {
 }
 
 model CarrierInsurancePolicy {
-  id            String   @id @default(cuid())
+  id            String        @id @default(cuid())
   carrierId     String
-  carrier       Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  carrier       Carrier       @relation(fields: [carrierId], references: [id], onDelete: Cascade)
   type          InsuranceType
   insurerName   String?
   policyNumber  String?
@@ -1447,8 +1468,9 @@ model CarrierInsurancePolicy {
   expiresAt     DateTime?
   // COI document backing this policy, if uploaded.
   documentId    String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
   @@index([carrierId, type, expiresAt])
 }
 
@@ -1456,42 +1478,45 @@ model CarrierEquipment {
   id            String   @id @default(cuid())
   carrierId     String
   carrier       Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  equipmentType String   // e.g. VAN, REEFER, FLATBED, BOX_TRUCK
+  equipmentType String // e.g. VAN, REEFER, FLATBED, BOX_TRUCK
   year          Int?
   make          String?
   unitNumber    String?
   vinLast6      String?
   hasLiftgate   Boolean  @default(false)
   createdAt     DateTime @default(now())
+
   @@index([carrierId])
 }
 
 model CarrierLane {
-  id              String  @id @default(cuid())
-  carrierId       String
-  carrier         Carrier @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  originState     String?
-  originMetro     String?
+  id               String   @id @default(cuid())
+  carrierId        String
+  carrier          Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  originState      String?
+  originMetro      String?
   destinationState String?
   destinationMetro String?
-  createdAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
   @@index([carrierId])
 }
 
 model CarrierAgreement {
-  id           String   @id @default(cuid())
-  carrierId    String
-  carrier      Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  id            String    @id @default(cuid())
+  carrierId     String
+  carrier       Carrier   @relation(fields: [carrierId], references: [id], onDelete: Cascade)
   // "DISPATCH" agreements are launch-safe; "BROKER_CARRIER" agreements stay
   // behind the compliance gates (spec rule #6) — creating/activating one is
   // guarded at the route level by assertBrokerageAllowed('brokerCarrierAgreements').
-  agreementType String   // DISPATCH | BROKER_CARRIER
-  version      String?
-  signedAt     DateTime?
-  signedByName String?
-  documentId   String?
-  active       Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  agreementType String // DISPATCH | BROKER_CARRIER
+  version       String?
+  signedAt      DateTime?
+  signedByName  String?
+  documentId    String?
+  active        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
   @@index([carrierId, agreementType])
 }
 
@@ -1501,28 +1526,30 @@ model CarrierAgreement {
  * re-checked and staleness detected (spec rule #4).
  */
 model CarrierFmcsaCheck {
-  id             String   @id @default(cuid())
-  carrierId      String
-  carrier        Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  dotNumber      String?
-  mcNumber       String?
+  id              String   @id @default(cuid())
+  carrierId       String
+  carrier         Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  dotNumber       String?
+  mcNumber        String?
   operatingStatus String? // result from source (e.g. "ACTIVE"/"INACTIVE")
-  authorized     Boolean?
-  sourceResult   Json?    // raw provider payload
-  checkedAt      DateTime @default(now())
-  checkError     String?  // set when the lookup failed (rule: handle failures)
+  authorized      Boolean?
+  sourceResult    Json? // raw provider payload
+  checkedAt       DateTime @default(now())
+  checkError      String? // set when the lookup failed (rule: handle failures)
+
   @@index([carrierId, checkedAt])
 }
 
 model CarrierStatusEvent {
-  id            String   @id @default(cuid())
-  carrierId     String
-  carrier       Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  fromStatus    CarrierStatus?
-  toStatus      CarrierStatus
-  reason        String?
-  changedById   String
-  createdAt     DateTime @default(now())
+  id          String         @id @default(cuid())
+  carrierId   String
+  carrier     Carrier        @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  fromStatus  CarrierStatus?
+  toStatus    CarrierStatus
+  reason      String?
+  changedById String
+  createdAt   DateTime       @default(now())
+
   @@index([carrierId, createdAt])
 }
 
@@ -1537,7 +1564,7 @@ enum FactoringVerificationStatus {
   PENDING_REVIEW
   VERIFIED
   REJECTED
-  EXPIRED        // NOA/document lapsed or was replaced → needs re-verification
+  EXPIRED // NOA/document lapsed or was replaced → needs re-verification
 }
 
 /**
@@ -1546,24 +1573,25 @@ enum FactoringVerificationStatus {
  * an admin action with a date + verifier. Does NOT hold bank credentials.
  */
 model CarrierFactoringProfile {
-  id                 String   @id @default(cuid())
-  carrierId          String   @unique
-  carrier            Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  usesFactoring      Boolean  @default(false)
+  id                   String            @id @default(cuid())
+  carrierId            String            @unique
+  carrier              Carrier           @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  usesFactoring        Boolean           @default(false)
   factoringCompanyName String?
-  contactName        String?
-  contactEmail       String?
-  contactPhone       String?
-  accountReference   String?  // factoring account/reference number (NOT a bank number)
+  contactName          String?
+  contactEmail         String?
+  contactPhone         String?
+  accountReference     String? // factoring account/reference number (NOT a bank number)
   // Optional link to a known FactoringPartner (dormant until agreements signed).
-  factoringPartnerId String?
-  factoringPartner   FactoringPartner? @relation(fields: [factoringPartnerId], references: [id], onDelete: SetNull)
+  factoringPartnerId   String?
+  factoringPartner     FactoringPartner? @relation(fields: [factoringPartnerId], references: [id], onDelete: SetNull)
 
   verificationStatus FactoringVerificationStatus @default(NOT_SUBMITTED)
   verifiedAt         DateTime?
   verifiedById       String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
   @@index([verificationStatus])
 }
 
@@ -1575,16 +1603,17 @@ enum FactoringDocumentType {
 }
 
 model FactoringDocument {
-  id            String   @id @default(cuid())
-  carrierId     String
-  type          FactoringDocumentType
-  storageKey    String   // S3 key only — file not in DB
-  fileName      String?
-  uploadedById  String
-  effectiveAt   DateTime?
-  expiresAt     DateTime?      // expiration / replacement tracking
-  supersededById String?       // set when replaced by a newer document
-  createdAt     DateTime @default(now())
+  id             String                @id @default(cuid())
+  carrierId      String
+  type           FactoringDocumentType
+  storageKey     String // S3 key only — file not in DB
+  fileName       String?
+  uploadedById   String
+  effectiveAt    DateTime?
+  expiresAt      DateTime? // expiration / replacement tracking
+  supersededById String? // set when replaced by a newer document
+  createdAt      DateTime              @default(now())
+
   @@index([carrierId, type, expiresAt])
 }
 
@@ -1603,23 +1632,24 @@ enum PaymentAssignmentStatus {
  * PaymentRoutingAudit row.
  */
 model PaymentAssignment {
-  id                 String   @id @default(cuid())
-  carrierId          String
-  carrier            Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  id                     String                  @id @default(cuid())
+  carrierId              String
+  carrier                Carrier                 @relation(fields: [carrierId], references: [id], onDelete: Cascade)
   // Where funds are remitted under the NOA — a factoring company's remittance
   // instructions (payee name, remit-to reference), NOT a bank account number.
-  remitToName        String
-  remitToReference   String?
+  remitToName            String
+  remitToReference       String?
   remittanceInstructions String?
-  noaDocumentId      String?  // the verified Notice of Assignment backing this
-  status             PaymentAssignmentStatus @default(PENDING_REVIEW)
-  approvedById       String?
-  approvedAt         DateTime?
-  effectiveAt        DateTime?
-  supersededById     String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  audits             PaymentRoutingAudit[]
+  noaDocumentId          String? // the verified Notice of Assignment backing this
+  status                 PaymentAssignmentStatus @default(PENDING_REVIEW)
+  approvedById           String?
+  approvedAt             DateTime?
+  effectiveAt            DateTime?
+  supersededById         String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  audits                 PaymentRoutingAudit[]
+
   @@index([carrierId, status])
 }
 
@@ -1628,23 +1658,24 @@ model PaymentAssignment {
  * what, with what supporting doc + reason). Append-only.
  */
 model PaymentRoutingAudit {
-  id                 String   @id @default(cuid())
-  paymentAssignmentId String
-  paymentAssignment  PaymentAssignment @relation(fields: [paymentAssignmentId], references: [id], onDelete: Cascade)
-  action             String   // CREATED | APPROVED | SUPERSEDED | REVOKED | CHANGE_REQUESTED
-  previousRemitTo    String?
-  newRemitTo         String?
+  id                   String            @id @default(cuid())
+  paymentAssignmentId  String
+  paymentAssignment    PaymentAssignment @relation(fields: [paymentAssignmentId], references: [id], onDelete: Cascade)
+  action               String // CREATED | APPROVED | SUPERSEDED | REVOKED | CHANGE_REQUESTED
+  previousRemitTo      String?
+  newRemitTo           String?
   supportingDocumentId String?
-  reason             String?
-  changedById        String
-  createdAt          DateTime @default(now())
+  reason               String?
+  changedById          String
+  createdAt            DateTime          @default(now())
+
   @@index([paymentAssignmentId, createdAt])
 }
 
 enum FactoringPartnerStatus {
-  PROSPECT          // no agreement yet
+  PROSPECT // no agreement yet
   AGREEMENT_PENDING
-  ACTIVE            // signed — referrals may be enabled
+  ACTIVE // signed — referrals may be enabled
   INACTIVE
 }
 
@@ -1663,22 +1694,23 @@ enum FactoringCommissionType {
  * docs.
  */
 model FactoringPartner {
-  id             String   @id @default(cuid())
-  companyName    String
-  status         FactoringPartnerStatus @default(PROSPECT)
-  referralEnabled Boolean @default(false)
-  applicationUrl String?
-  contactName    String?
-  contactEmail   String?
-  contactPhone   String?
-  referralTerms  String?
-  commissionType FactoringCommissionType @default(NONE)
-  commissionAmount Int?   // cents (FLAT/PER_FUNDED_LOAD) or basis points (PERCENTAGE)
-  trackingCode   String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  referrals      FactoringReferral[]
+  id                String                    @id @default(cuid())
+  companyName       String
+  status            FactoringPartnerStatus    @default(PROSPECT)
+  referralEnabled   Boolean                   @default(false)
+  applicationUrl    String?
+  contactName       String?
+  contactEmail      String?
+  contactPhone      String?
+  referralTerms     String?
+  commissionType    FactoringCommissionType   @default(NONE)
+  commissionAmount  Int? // cents (FLAT/PER_FUNDED_LOAD) or basis points (PERCENTAGE)
+  trackingCode      String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  referrals         FactoringReferral[]
   factoringProfiles CarrierFactoringProfile[]
+
   @@index([status, referralEnabled])
 }
 
@@ -1702,150 +1734,153 @@ enum FactoringReferralStatus {
  * carrier's explicit consent before any data leaves TempMovers.
  */
 model FactoringReferral {
-  id                String   @id @default(cuid())
-  carrierId         String
-  carrier           Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  id                 String                  @id @default(cuid())
+  carrierId          String
+  carrier            Carrier                 @relation(fields: [carrierId], references: [id], onDelete: Cascade)
   factoringPartnerId String
-  factoringPartner  FactoringPartner @relation(fields: [factoringPartnerId], references: [id], onDelete: Cascade)
-  status            FactoringReferralStatus @default(REQUESTED)
-  consentTimestamp  DateTime?
-  submittedAt       DateTime?
-  externalReference String?
-  approvedAt        DateTime?
-  fundedAt          DateTime?
-  referralRevenue   Int?     // cents, when a partner reports it
-  internalNotes     String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  factoringPartner   FactoringPartner        @relation(fields: [factoringPartnerId], references: [id], onDelete: Cascade)
+  status             FactoringReferralStatus @default(REQUESTED)
+  consentTimestamp   DateTime?
+  submittedAt        DateTime?
+  externalReference  String?
+  approvedAt         DateTime?
+  fundedAt           DateTime?
+  referralRevenue    Int? // cents, when a partner reports it
+  internalNotes      String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
   @@index([carrierId, status])
   @@index([factoringPartnerId, status])
 }
 
 model Vehicle {
-  id                      String        @id @default(cuid())
-  workerId                String
-  worker                  WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  type                    VehicleType
-  year                    Int?
-  make                    String?
-  model                   String?
-  plateNumber             String?
-  plateState              String?
-  vinLast6                String?
-  capacityDescription     String?
-  hasLiftgate             Boolean       @default(false)
-  hasPalletJack           Boolean       @default(false)
-  commercialInsurance     Boolean       @default(false)
-  insuranceExpiresAt      DateTime?
-  registrationExpiresAt   DateTime?
-  dotNumber               String?
-  mcNumber                String?
-  verified                Boolean       @default(false)
-  active                  Boolean       @default(true)
-  assignments             Assignment[]
+  id                    String        @id @default(cuid())
+  workerId              String
+  worker                WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  type                  VehicleType
+  year                  Int?
+  make                  String?
+  model                 String?
+  plateNumber           String?
+  plateState            String?
+  vinLast6              String?
+  capacityDescription   String?
+  hasLiftgate           Boolean       @default(false)
+  hasPalletJack         Boolean       @default(false)
+  commercialInsurance   Boolean       @default(false)
+  insuranceExpiresAt    DateTime?
+  registrationExpiresAt DateTime?
+  dotNumber             String?
+  mcNumber              String?
+  verified              Boolean       @default(false)
+  active                Boolean       @default(true)
+  assignments           Assignment[]
 }
 
 model Job {
-  id                       String          @id @default(cuid())
-  customerId               String
-  customer                 CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  addressId                String
-  address                  Address         @relation(fields: [addressId], references: [id], onDelete: Restrict)
+  id                            String               @id @default(cuid())
+  customerId                    String
+  customer                      CustomerProfile      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  addressId                     String
+  address                       Address              @relation(fields: [addressId], references: [id], onDelete: Restrict)
   // Nullable during migration/backfill (see prisma/backfill-geo.ts) — the
   // plan is to backfill every existing job, then enforce non-null once
   // validated. Denormalized here (in addition to living on Address) so
   // market-scoped feed/admin queries don't need a join.
-  marketId                 String?
-  market                   LaunchMarket?   @relation(fields: [marketId], references: [id], onDelete: SetNull)
-  territoryId              String?
-  territory                Territory?      @relation(fields: [territoryId], references: [id], onDelete: SetNull)
-  latitude                 Decimal?        @db.Decimal(9,6)
-  longitude                Decimal?        @db.Decimal(9,6)
+  marketId                      String?
+  market                        LaunchMarket?        @relation(fields: [marketId], references: [id], onDelete: SetNull)
+  territoryId                   String?
+  territory                     Territory?           @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  latitude                      Decimal?             @db.Decimal(9, 6)
+  longitude                     Decimal?             @db.Decimal(9, 6)
   // True when this job was created without Google Maps configured, so
   // latitude/longitude are null and radius-based worker matching silently
   // falls back to market/territory membership alone (see lib/geo.ts).
   // Flags the record for admin review rather than letting the degradation
   // pass unnoticed.
-  needsManualGeoReview     Boolean         @default(false)
-  title                    String
-  description              String?
-  type                     JobType
-  status                   JobStatus       @default(DRAFT)
-  postingMode              JobPostingMode  @default(OPEN_MARKETPLACE)
-  startsAt                 DateTime
-  estimatedHours           Decimal         @db.Decimal(5, 2)
-  minimumHours             Int             @default(3)
-  moversRequired           Int             @default(2)
-  driversRequired          Int             @default(0)
-  customerMoverRateCents   Int
-  platformFeePerHourCents  Int             @default(500)
-  urgentFeeMode            UrgentFeeMode    @default(HOURLY_FEE)
-  urgentPlatformFeePerHourCents Int         @default(700)
-  urgentPremiumCents       Int             @default(0)
-  bookingProtectionFeeCents Int            @default(995)
-  driverFeeModel            DriverFeeModel  @default(NONE)
-  routeGrossCents           Int?
-  driverPlatformFeePercent  Int?
-  driverPlatformFeeCapCents Int?
-  estimatedSubtotalCents   Int
-  estimatedPlatformFeeCents Int
-  estimatedTotalCents      Int
+  needsManualGeoReview          Boolean              @default(false)
+  title                         String
+  description                   String?
+  type                          JobType
+  status                        JobStatus            @default(DRAFT)
+  postingMode                   JobPostingMode       @default(OPEN_MARKETPLACE)
+  startsAt                      DateTime
+  estimatedHours                Decimal              @db.Decimal(5, 2)
+  minimumHours                  Int                  @default(3)
+  moversRequired                Int                  @default(2)
+  driversRequired               Int                  @default(0)
+  customerMoverRateCents        Int
+  platformFeePerHourCents       Int                  @default(500)
+  urgentFeeMode                 UrgentFeeMode        @default(HOURLY_FEE)
+  urgentPlatformFeePerHourCents Int                  @default(700)
+  urgentPremiumCents            Int                  @default(0)
+  bookingProtectionFeeCents     Int                  @default(995)
+  driverFeeModel                DriverFeeModel       @default(NONE)
+  routeGrossCents               Int?
+  driverPlatformFeePercent      Int?
+  driverPlatformFeeCapCents     Int?
+  estimatedSubtotalCents        Int
+  estimatedPlatformFeeCents     Int
+  estimatedTotalCents           Int
   // Populated only at capture time, from actual approved assignment hours
   // — never equal to the estimate above except by coincidence. Kept
   // separate rather than overwriting the estimate, since both numbers are
   // legitimately meaningful: what the customer was quoted, and what they
   // were actually charged.
-  finalLaborCents          Int?
-  finalPlatformFeeCents    Int?
-  finalTotalCents          Int?
-  authorizedAmountCents    Int?
-  capturedAmountCents      Int?
-  pricingSnapshot          Json?
-  capturedAt               DateTime?
-  stripePaymentIntentId    String?         @unique
-  paymentStatus            PaymentStatus   @default(REQUIRES_PAYMENT_METHOD)
-  paymentAttempts          PaymentAttempt[]
-  paymentTransactions      PaymentTransaction[]
-  tips                     Tip[]
-  createdAt                DateTime        @default(now())
-  updatedAt                DateTime        @updatedAt
-  assignments              Assignment[]
-  requiredSkills           JobSkill[]
-  reviews                  Review[]
-  auditLogs                AuditLog[]
+  finalLaborCents               Int?
+  finalPlatformFeeCents         Int?
+  finalTotalCents               Int?
+  authorizedAmountCents         Int?
+  capturedAmountCents           Int?
+  pricingSnapshot               Json?
+  capturedAt                    DateTime?
+  stripePaymentIntentId         String?              @unique
+  paymentStatus                 PaymentStatus        @default(REQUIRES_PAYMENT_METHOD)
+  paymentAttempts               PaymentAttempt[]
+  paymentTransactions           PaymentTransaction[]
+  tips                          Tip[]
+  createdAt                     DateTime             @default(now())
+  updatedAt                     DateTime             @updatedAt
+  assignments                   Assignment[]
+  requiredSkills                JobSkill[]
+  reviews                       Review[]
+  auditLogs                     AuditLog[]
+  bookingAccessorials           BookingAccessorial[]
+
   @@index([status, startsAt])
-  bookingAccessorials BookingAccessorial[]
   @@index([marketId, status])
   @@index([territoryId, status])
   @@index([addressId])
 }
 
 model Assignment {
-  id                    String           @id @default(cuid())
-  jobId                 String
-  job                   Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  workerId              String
-  worker                WorkerProfile    @relation(fields: [workerId], references: [id], onDelete: Restrict)
-  vehicleId             String?
-  vehicle               Vehicle?         @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
-  status                AssignmentStatus @default(INVITED)
-  agreedEarningsCents   Int
-  platformFeeCents      Int              @default(500)
-  scheduledHours        Decimal          @db.Decimal(5, 2)
-  actualHours           Decimal?         @db.Decimal(5, 2)
-  checkInAt             DateTime?
-  checkOutAt            DateTime?
-  checkInLatitude       Decimal?         @db.Decimal(10, 7)
-  checkInLongitude      Decimal?         @db.Decimal(10, 7)
-  checkOutLatitude      Decimal?         @db.Decimal(10, 7)
-  checkOutLongitude     Decimal?         @db.Decimal(10, 7)
-  customerApprovedAt    DateTime?
-  disputedAt            DateTime?
-  disputeReason         String?
-  createdAt             DateTime         @default(now())
-  expiresAt             DateTime?
-  respondedAt           DateTime?
-  payout                Payout?
+  id                  String           @id @default(cuid())
+  jobId               String
+  job                 Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  workerId            String
+  worker              WorkerProfile    @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  vehicleId           String?
+  vehicle             Vehicle?         @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  status              AssignmentStatus @default(INVITED)
+  agreedEarningsCents Int
+  platformFeeCents    Int              @default(500)
+  scheduledHours      Decimal          @db.Decimal(5, 2)
+  actualHours         Decimal?         @db.Decimal(5, 2)
+  checkInAt           DateTime?
+  checkOutAt          DateTime?
+  checkInLatitude     Decimal?         @db.Decimal(10, 7)
+  checkInLongitude    Decimal?         @db.Decimal(10, 7)
+  checkOutLatitude    Decimal?         @db.Decimal(10, 7)
+  checkOutLongitude   Decimal?         @db.Decimal(10, 7)
+  customerApprovedAt  DateTime?
+  disputedAt          DateTime?
+  disputeReason       String?
+  createdAt           DateTime         @default(now())
+  expiresAt           DateTime?
+  respondedAt         DateTime?
+  payout              Payout?
+
   @@unique([jobId, workerId])
   @@index([workerId, status])
 }
@@ -1857,14 +1892,14 @@ model Assignment {
 // + scheduled reconciliation worker can be built without another schema
 // migration when that becomes necessary.
 model PayoutOperation {
-  id        String @id @default(cuid())
-  payoutId  String
-  payout    Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  id       String @id @default(cuid())
+  payoutId String
+  payout   Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
 
-  idempotencyKey   String   @unique
+  idempotencyKey   String                @unique
   status           PayoutOperationStatus
   stripeTransferId String?
-  startedAt        DateTime @default(now())
+  startedAt        DateTime              @default(now())
   completedAt      DateTime?
   lastError        String?
 
@@ -1878,31 +1913,31 @@ enum PayoutOperationStatus {
 }
 
 model Payout {
-  id                  String        @id @default(cuid())
-  workerId            String
-  worker              WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Restrict)
-  assignmentId        String        @unique
-  assignment          Assignment    @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
-  grossEarningsCents  Int
-  adjustmentsCents    Int           @default(0)
-  recoveryCents       Int           @default(0)
-  netPayoutCents      Int
-  stripeTransferId    String?       @unique
-  idempotencyKey      String?       @unique
-  status              PayoutStatus  @default(PENDING)
-  scheduledAt         DateTime?
-  paidAt              DateTime?
+  id                 String             @id @default(cuid())
+  workerId           String
+  worker             WorkerProfile      @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  assignmentId       String             @unique
+  assignment         Assignment         @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  grossEarningsCents Int
+  adjustmentsCents   Int                @default(0)
+  recoveryCents      Int                @default(0)
+  netPayoutCents     Int
+  stripeTransferId   String?            @unique
+  idempotencyKey     String?            @unique
+  status             PayoutStatus       @default(PENDING)
+  scheduledAt        DateTime?
+  paidAt             DateTime?
   // Distinct from paidAt above (which is set at TRANSFERRED time) — this
   // is the true bank-arrival confirmation from payout.paid.
-  paidOutAt           DateTime?
-  stripePayoutId      String?
-  failedAt            DateTime?
-  failureReason       String?
-  retryCount          Int           @default(0)
-  reversedAt          DateTime?
-  createdAt           DateTime      @default(now())
-  bonusLedgerEntries  BonusLedgerEntry[]
-  operations          PayoutOperation[]
+  paidOutAt          DateTime?
+  stripePayoutId     String?
+  failedAt           DateTime?
+  failureReason      String?
+  retryCount         Int                @default(0)
+  reversedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  bonusLedgerEntries BonusLedgerEntry[]
+  operations         PayoutOperation[]
 }
 
 /**
@@ -1912,25 +1947,24 @@ model Payout {
  * and transferred to one or more workers, 100% with no platform fee),
  * and conflating them with the job/load's own payment would make both
  * harder to audit independently.
- *
  * Exactly one of jobId/loadId is set, matching the same pattern already
  * used by PaymentAttempt and PaymentTransaction for the same reason: a
  * tip belongs to a moving job OR a freight load, never both.
  */
 model Tip {
-  id                    String    @id @default(cuid())
+  id                    String          @id @default(cuid())
   jobId                 String?
-  job                   Job? @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job                   Job?            @relation(fields: [jobId], references: [id], onDelete: Cascade)
   loadId                String?
-  load                  CarrierRoute? @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  load                  CarrierRoute?   @relation(fields: [loadId], references: [id], onDelete: Cascade)
   customerId            String
   customer              CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
   amountCents           Int
-  stripePaymentIntentId String?   @unique
-  idempotencyKey        String?   @unique
-  status                TipStatus @default(PROCESSING)
+  stripePaymentIntentId String?         @unique
+  idempotencyKey        String?         @unique
+  status                TipStatus       @default(PROCESSING)
   failureReason         String?
-  createdAt             DateTime  @default(now())
+  createdAt             DateTime        @default(now())
   succeededAt           DateTime?
   allocations           TipAllocation[]
 
@@ -1949,15 +1983,15 @@ model Tip {
  * tip that hasn't actually been collected yet.
  */
 model TipAllocation {
-  id               String       @id @default(cuid())
+  id               String        @id @default(cuid())
   tipId            String
-  tip              Tip @relation(fields: [tipId], references: [id], onDelete: Cascade)
+  tip              Tip           @relation(fields: [tipId], references: [id], onDelete: Cascade)
   workerId         String
   worker           WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Restrict)
   amountCents      Int
-  stripeTransferId String?      @unique
-  idempotencyKey   String?      @unique
-  status           PayoutStatus @default(PENDING)
+  stripeTransferId String?       @unique
+  idempotencyKey   String?       @unique
+  status           PayoutStatus  @default(PENDING)
   paidAt           DateTime?
   // Distinct from paidAt above (set at TRANSFERRED time) — this is the
   // true bank-arrival confirmation, same distinction as Payout.paidOutAt.
@@ -1966,33 +2000,34 @@ model TipAllocation {
   failedAt         DateTime?
   failureReason    String?
   reversedAt       DateTime?
-  createdAt        DateTime     @default(now())
+  createdAt        DateTime      @default(now())
 
   @@index([workerId])
   @@index([tipId])
 }
 
 model Review {
-  id          String        @id @default(cuid())
-  jobId       String
-  job         Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  workerId    String
-  worker      WorkerProfile @relation("WorkerReviews", fields: [workerId], references: [id], onDelete: Cascade)
-  customerId  String
-  customer    CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  id         String          @id @default(cuid())
+  jobId      String
+  job        Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  workerId   String
+  worker     WorkerProfile   @relation("WorkerReviews", fields: [workerId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
-  rating      Int
-  comment     String?
-  tags        ReviewTag[]
-  status      ReviewStatus @default(PUBLISHED)
+  rating  Int
+  comment String?
+  tags    ReviewTag[]
+  status  ReviewStatus @default(PUBLISHED)
 
   reportedAt   DateTime?
   reportReason String?
   moderatedAt  DateTime?
   moderatedBy  String?
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([jobId, workerId])
   @@index([workerId, status, createdAt])
   @@index([customerId, createdAt])
@@ -2020,23 +2055,24 @@ enum ReviewTag {
 // idempotencyKey) and gives support a single place to see delivery history
 // per user, instead of Resend/Twilio dashboards being the only record.
 model Notification {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String
-  channel   NotificationChannel
-  title     String
-  body      String
-  data      Json?
-  idempotencyKey    String   @unique
-  status            NotificationStatus @default(QUEUED)
-  providerMessageId  String?
-  failureReason      String?
-  sentAt             DateTime?
-  deliveredAt        DateTime?
-  bouncedAt          DateTime?
-  readAt    DateTime?
-  createdAt DateTime @default(now())
+  id                String              @id @default(cuid())
+  userId            String
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String
+  channel           NotificationChannel
+  title             String
+  body              String
+  data              Json?
+  idempotencyKey    String              @unique
+  status            NotificationStatus  @default(QUEUED)
+  providerMessageId String?
+  failureReason     String?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  bouncedAt         DateTime?
+  readAt            DateTime?
+  createdAt         DateTime            @default(now())
+
   @@index([userId, status, createdAt])
 }
 
@@ -2056,216 +2092,219 @@ enum NotificationStatus {
 }
 
 model PricingRule {
-  id                      String   @id @default(cuid())
-  marketCode              String   @unique
-  state                    String?
-  city                     String?
-  minimumHours            Int      @default(3)
-  minimumMovers            Int      @default(2)
-  platformFeePerHourCents  Int      @default(500)
-  urgentFeeMode            UrgentFeeMode @default(HOURLY_FEE)
-  urgentPlatformFeePerHourCents Int @default(700)
-  customerBookingProtectionFeeCents Int @default(995)
-  waiveMoverSubscriptionUntilFirstJob Boolean @default(true)
-  moverSubscriptionCents          Int      @default(1995)
-  driverBasicSubscriptionCents     Int      @default(2995)
-  ownerOperatorSubscriptionCents   Int      @default(5995)
-  fleetSubscriptionCents           Int      @default(14900)
-  boxTruckFeePerHourCents           Int      @default(500)
-  semiPlatformFeePercent           Int      @default(5)
-  semiPlatformFeeCapCents          Int      @default(15000)
+  id                                  String        @id @default(cuid())
+  marketCode                          String        @unique
+  state                               String?
+  city                                String?
+  minimumHours                        Int           @default(3)
+  minimumMovers                       Int           @default(2)
+  platformFeePerHourCents             Int           @default(500)
+  urgentFeeMode                       UrgentFeeMode @default(HOURLY_FEE)
+  urgentPlatformFeePerHourCents       Int           @default(700)
+  customerBookingProtectionFeeCents   Int           @default(995)
+  waiveMoverSubscriptionUntilFirstJob Boolean       @default(true)
+  moverSubscriptionCents              Int           @default(1995)
+  driverBasicSubscriptionCents        Int           @default(2995)
+  ownerOperatorSubscriptionCents      Int           @default(5995)
+  fleetSubscriptionCents              Int           @default(14900)
+  boxTruckFeePerHourCents             Int           @default(500)
+  semiPlatformFeePercent              Int           @default(5)
+  semiPlatformFeeCapCents             Int           @default(15000)
   // Admin-configurable fee MODEL per freight service type (the fee AMOUNT
   // fields above are unchanged). Moving labor and local box-truck jobs are
   // always ADD_TO_CUSTOMER and intentionally have no toggle. Freight loads
   // default to DEDUCT_FROM_PROVIDER so quoted prices match load-board norms.
-  semiFeeModel                     FeeModel @default(DEDUCT_FROM_PROVIDER)
-  freightBoxTruckFeeModel          FeeModel @default(DEDUCT_FROM_PROVIDER)
-  fleetIncludedVehicles            Int      @default(5)
-  additionalFleetVehicleCents      Int      @default(1500)
-  urgentPremiumPercent     Int      @default(20)
-  active                   Boolean  @default(true)
-  updatedAt                DateTime @updatedAt
+  semiFeeModel                        FeeModel      @default(DEDUCT_FROM_PROVIDER)
+  freightBoxTruckFeeModel             FeeModel      @default(DEDUCT_FROM_PROVIDER)
+  fleetIncludedVehicles               Int           @default(5)
+  additionalFleetVehicleCents         Int           @default(1500)
+  urgentPremiumPercent                Int           @default(20)
+  active                              Boolean       @default(true)
+  updatedAt                           DateTime      @updatedAt
 }
 
-
 model PartnerOrganization {
-  id                  String       @id @default(cuid())
-  customerId          String
-  customer            CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  type                PartnerType
-  legalName           String
-  displayName         String
-  billingEmail        String?
-  monthlyInvoicing    Boolean      @default(false)
+  id                    String            @id @default(cuid())
+  customerId            String
+  customer              CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type                  PartnerType
+  legalName             String
+  displayName           String
+  billingEmail          String?
+  monthlyInvoicing      Boolean           @default(false)
   jobAuthorizationCents Int?
-  confidentialJobs    Boolean      @default(false)
-  referralCode        String       @unique
-  active              Boolean      @default(true)
-  members             PartnerMember[]
-  properties          PartnerLocation[]
-  preferredWorkers    PreferredWorker[]
-  referralEvents      ReferralEvent[]
-  bonusAwards         BonusAward[]
-  carrierRoutes       CarrierRoute[]
-  markets             PartnerMarket[]
-  invoices            PartnerInvoice[]
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  confidentialJobs      Boolean           @default(false)
+  referralCode          String            @unique
+  active                Boolean           @default(true)
+  members               PartnerMember[]
+  properties            PartnerLocation[]
+  preferredWorkers      PreferredWorker[]
+  referralEvents        ReferralEvent[]
+  bonusAwards           BonusAward[]
+  carrierRoutes         CarrierRoute[]
+  markets               PartnerMarket[]
+  invoices              PartnerInvoice[]
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 }
 
 model PartnerMember {
-  id          String @id @default(cuid())
+  id          String              @id @default(cuid())
   partnerId   String
   partner     PartnerOrganization @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   userId      String
-  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role        String @default("MEMBER")
-  canPostJobs Boolean @default(true)
-  canApprove  Boolean @default(false)
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String              @default("MEMBER")
+  canPostJobs Boolean             @default(true)
+  canApprove  Boolean             @default(false)
+
   @@unique([partnerId, userId])
 }
 
 model PartnerLocation {
-  id          String @id @default(cuid())
-  partnerId   String
-  partner     PartnerOrganization @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  name        String
-  address1    String
-  city        String
-  state       String
-  postalCode  String
-  latitude    Decimal? @db.Decimal(10,7)
-  longitude   Decimal? @db.Decimal(10,7)
+  id                    String              @id @default(cuid())
+  partnerId             String
+  partner               PartnerOrganization @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  name                  String
+  address1              String
+  city                  String
+  state                 String
+  postalCode            String
+  latitude              Decimal?            @db.Decimal(10, 7)
+  longitude             Decimal?            @db.Decimal(10, 7)
   recurringInstructions String?
-  active      Boolean @default(true)
+  active                Boolean             @default(true)
 }
 
 model PreferredWorker {
-  id          String @id @default(cuid())
-  partnerId   String
-  partner     PartnerOrganization @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  workerId    String
-  worker      WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  priority    Int @default(1)
-  createdAt   DateTime @default(now())
+  id        String              @id @default(cuid())
+  partnerId String
+  partner   PartnerOrganization @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  workerId  String
+  worker    WorkerProfile       @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  priority  Int                 @default(1)
+  createdAt DateTime            @default(now())
+
   @@unique([partnerId, workerId])
 }
 
 model ReferralEvent {
-  id              String @id @default(cuid())
-  partnerId       String?
-  partner         PartnerOrganization? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
-  referralCode    String
-  referredEmail   String?
-  sourceType      String
-  qualifiedAt     DateTime?
-  completedJobId  String?
-  rewardCents     Int @default(0)
-  createdAt       DateTime @default(now())
+  id             String               @id @default(cuid())
+  partnerId      String?
+  partner        PartnerOrganization? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  referralCode   String
+  referredEmail  String?
+  sourceType     String
+  qualifiedAt    DateTime?
+  completedJobId String?
+  rewardCents    Int                  @default(0)
+  createdAt      DateTime             @default(now())
 }
 
 model BonusProgram {
-  id                  String @id @default(cuid())
-  code                String @unique
-  name                String
-  type                BonusType
-  recipientKind       BonusRecipientKind
-  amountCents         Int
-  qualificationCount  Int @default(1)
-  marketCode          String?
-  active              Boolean @default(true)
-  startsAt            DateTime?
-  endsAt              DateTime?
-  awards              BonusAward[]
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String             @id @default(cuid())
+  code               String             @unique
+  name               String
+  type               BonusType
+  recipientKind      BonusRecipientKind
+  amountCents        Int
+  qualificationCount Int                @default(1)
+  marketCode         String?
+  active             Boolean            @default(true)
+  startsAt           DateTime?
+  endsAt             DateTime?
+  awards             BonusAward[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 }
 
 model BonusAward {
-  id          String @id @default(cuid())
-  programId   String
-  program     BonusProgram @relation(fields: [programId], references: [id], onDelete: Restrict)
-  userId      String?
-  user        User? @relation(fields: [userId], references: [id], onDelete: SetNull)
-  workerId    String?
-  worker      WorkerProfile? @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  id                    String               @id @default(cuid())
+  programId             String
+  program               BonusProgram         @relation(fields: [programId], references: [id], onDelete: Restrict)
+  userId                String?
+  user                  User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workerId              String?
+  worker                WorkerProfile?       @relation(fields: [workerId], references: [id], onDelete: SetNull)
   partnerOrganizationId String?
   partnerOrganization   PartnerOrganization? @relation(fields: [partnerOrganizationId], references: [id], onDelete: SetNull)
-  status      BonusStatus @default(PENDING)
-  amountCents Int
-  reason      String
-  qualifyingEntityId String?
-  approvedById String?
-  approvedBy   User? @relation("BonusApprover", fields: [approvedById], references: [id], onDelete: SetNull)
-  denialReason String?
-  earnedAt    DateTime?
-  approvedAt  DateTime?
-  paidAt      DateTime?
-  createdAt   DateTime @default(now())
-  ledgerEntries BonusLedgerEntry[]
-  @@index([status, createdAt])
+  status                BonusStatus          @default(PENDING)
+  amountCents           Int
+  reason                String
+  qualifyingEntityId    String?
+  approvedById          String?
+  approvedBy            User?                @relation("BonusApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  denialReason          String?
+  earnedAt              DateTime?
+  approvedAt            DateTime?
+  paidAt                DateTime?
+  createdAt             DateTime             @default(now())
+  ledgerEntries         BonusLedgerEntry[]
+
   @@unique([programId, qualifyingEntityId])
+  @@index([status, createdAt])
 }
 
 model LaunchMarket {
-  id                    String @id @default(cuid())
-  marketCode            String @unique
-  name                  String
-  state                 String
-  countryCode           String @default("US")
-  timezone              String @default("America/Indiana/Indianapolis")
-  stage                 MarketStage @default(PLANNING)
+  id                        String      @id @default(cuid())
+  marketCode                String      @unique
+  name                      String
+  state                     String
+  countryCode               String      @default("US")
+  timezone                  String      @default("America/Indiana/Indianapolis")
+  stage                     MarketStage @default(PLANNING)
   // Per-market service controls — a market being ACTIVE does NOT auto-enable
   // every service. Each toggles independently. The freight brokerage control
   // is necessary-but-not-sufficient: it can never override the GLOBAL
   // compliance flags (see lib/compliance/market-brokerage.ts) — brokerage
   // requires global master ON + capability ON + this market flag ON + perm.
-  customerBookingEnabled    Boolean @default(false)
-  moverRecruitmentEnabled   Boolean @default(false)
-  driverRecruitmentEnabled  Boolean @default(false)
-  carrierRecruitmentEnabled Boolean @default(false)
-  dispatchSupportEnabled    Boolean @default(false)
-  freightBrokerageEnabled   Boolean @default(false)
+  customerBookingEnabled    Boolean     @default(false)
+  moverRecruitmentEnabled   Boolean     @default(false)
+  driverRecruitmentEnabled  Boolean     @default(false)
+  carrierRecruitmentEnabled Boolean     @default(false)
+  dispatchSupportEnabled    Boolean     @default(false)
+  freightBrokerageEnabled   Boolean     @default(false)
   // Legacy staged-activation flags retained for back-compat with existing
   // route checks; the six controls above are the spec's canonical set.
-  publicBookingEnabled     Boolean @default(false)
-  workerRecruitingEnabled  Boolean @default(false)
-  freightEnabled           Boolean @default(false)
-  centerLat             Decimal? @db.Decimal(9,6)
-  centerLng             Decimal? @db.Decimal(9,6)
-  defaultRadiusMiles    Int?
-  targetPropertyManagers Int @default(25)
-  targetApartments       Int @default(20)
-  targetStorage          Int @default(15)
-  targetMovingCompanies  Int @default(15)
-  targetRetailers        Int @default(20)
-  targetShippers         Int @default(20)
-  signedPilotPartners    Int @default(0)
-  forecastedJobs         Int @default(0)
-  activeMovers           Int @default(0)
-  activeBoxTruckDrivers  Int @default(0)
-  activeSemiDrivers      Int @default(0)
-  fillRate               Decimal @default(0) @db.Decimal(5,2)
-  firstAcceptanceMinutes Decimal @default(0) @db.Decimal(7,2)
-  noShowRate             Decimal @default(0) @db.Decimal(5,2)
-  repeatCustomerRate     Decimal @default(0) @db.Decimal(5,2)
-  expansionReady         Boolean @default(false)
-  zipCodes               String[]
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  publicBookingEnabled      Boolean     @default(false)
+  workerRecruitingEnabled   Boolean     @default(false)
+  freightEnabled            Boolean     @default(false)
+  centerLat                 Decimal?    @db.Decimal(9, 6)
+  centerLng                 Decimal?    @db.Decimal(9, 6)
+  defaultRadiusMiles        Int?
+  targetPropertyManagers    Int         @default(25)
+  targetApartments          Int         @default(20)
+  targetStorage             Int         @default(15)
+  targetMovingCompanies     Int         @default(15)
+  targetRetailers           Int         @default(20)
+  targetShippers            Int         @default(20)
+  signedPilotPartners       Int         @default(0)
+  forecastedJobs            Int         @default(0)
+  activeMovers              Int         @default(0)
+  activeBoxTruckDrivers     Int         @default(0)
+  activeSemiDrivers         Int         @default(0)
+  fillRate                  Decimal     @default(0) @db.Decimal(5, 2)
+  firstAcceptanceMinutes    Decimal     @default(0) @db.Decimal(7, 2)
+  noShowRate                Decimal     @default(0) @db.Decimal(5, 2)
+  repeatCustomerRate        Decimal     @default(0) @db.Decimal(5, 2)
+  expansionReady            Boolean     @default(false)
+  zipCodes                  String[]
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
 
-  territories    Territory[]
-  jobs           Job[]
-  originRoutes   CarrierRoute[] @relation("RouteOrigin")
-  destRoutes     CarrierRoute[] @relation("RouteDestination")
-  workerMarkets  WorkerMarket[]
-  primaryForWorkers WorkerProfile[] @relation("PrimaryMarket")
-  partnerMarkets PartnerMarket[]
-  pricingRules   MarketPricingRule[]
-  adminAssignments AdminAssignment[]
+  territories       Territory[]
+  jobs              Job[]
+  originRoutes      CarrierRoute[]           @relation("RouteOrigin")
+  destRoutes        CarrierRoute[]           @relation("RouteDestination")
+  workerMarkets     WorkerMarket[]
+  primaryForWorkers WorkerProfile[]          @relation("PrimaryMarket")
+  partnerMarkets    PartnerMarket[]
+  pricingRules      MarketPricingRule[]
+  adminAssignments  AdminAssignment[]
   accessorialPrices AccessorialMarketPrice[]
   changeLogs        MarketChangeLog[]
   carriers          Carrier[]
+
   @@index([state, stage])
 }
 
@@ -2275,21 +2314,22 @@ model LaunchMarket {
  * whether a readiness override was used. Append-only by convention.
  */
 model MarketChangeLog {
-  id             String   @id @default(cuid())
-  marketId       String
-  market         LaunchMarket @relation(fields: [marketId], references: [id])
-  previousStage  MarketStage?
-  newStage       MarketStage?
-  changedFields  Json
-  changedById    String
-  changeReason   String?
-  overrideUsed   Boolean  @default(false)
-  createdAt      DateTime @default(now())
+  id            String       @id @default(cuid())
+  marketId      String
+  market        LaunchMarket @relation(fields: [marketId], references: [id])
+  previousStage MarketStage?
+  newStage      MarketStage?
+  changedFields Json
+  changedById   String
+  changeReason  String?
+  overrideUsed  Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
   @@index([marketId, createdAt])
 }
 
 model Territory {
-  id       String @id @default(cuid())
+  id       String       @id @default(cuid())
   marketId String
   market   LaunchMarket @relation(fields: [marketId], references: [id], onDelete: Cascade)
 
@@ -2298,72 +2338,76 @@ model Territory {
   type   TerritoryType
   status TerritoryStatus @default(PLANNED)
 
-  city      String?
-  county    String?
-  state     String
-  zipCodes  String[]
+  city        String?
+  county      String?
+  state       String
+  zipCodes    String[]
   radiusMiles Int?
-  centerLat Decimal? @db.Decimal(9,6)
-  centerLng Decimal? @db.Decimal(9,6)
-  geoJson   Json?
+  centerLat   Decimal? @db.Decimal(9, 6)
+  centerLng   Decimal? @db.Decimal(9, 6)
+  geoJson     Json?
 
   jobs              Job[]
-  originRoutes      CarrierRoute[] @relation("RouteOriginTerritory")
-  destRoutes        CarrierRoute[] @relation("RouteDestinationTerritory")
+  originRoutes      CarrierRoute[]      @relation("RouteOriginTerritory")
+  destRoutes        CarrierRoute[]      @relation("RouteDestinationTerritory")
   workerTerritories WorkerTerritory[]
   pricingRules      MarketPricingRule[]
   adminAssignments  AdminAssignment[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
   accessorialPrices AccessorialMarketPrice[]
+
   @@unique([marketId, slug])
   @@index([marketId, status])
   @@index([state])
 }
 
 model WorkerMarket {
-  id       String @id @default(cuid())
+  id       String        @id @default(cuid())
   workerId String
   worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
   marketId String
-  market   LaunchMarket @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  market   LaunchMarket  @relation(fields: [marketId], references: [id], onDelete: Cascade)
 
-  active             Boolean @default(true)
-  acceptingJobs      Boolean @default(true)
+  active             Boolean  @default(true)
+  acceptingJobs      Boolean  @default(true)
   serviceRadiusMiles Int?
-  homeLatitude       Decimal? @db.Decimal(9,6)
-  homeLongitude      Decimal? @db.Decimal(9,6)
+  homeLatitude       Decimal? @db.Decimal(9, 6)
+  homeLongitude      Decimal? @db.Decimal(9, 6)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   @@unique([workerId, marketId])
   @@index([marketId, active])
 }
 
 model WorkerTerritory {
-  id          String @id @default(cuid())
+  id          String        @id @default(cuid())
   workerId    String
   worker      WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
   territoryId String
-  territory   Territory @relation(fields: [territoryId], references: [id], onDelete: Cascade)
+  territory   Territory     @relation(fields: [territoryId], references: [id], onDelete: Cascade)
 
   active   Boolean @default(true)
-  priority Int @default(0)
+  priority Int     @default(0)
 
   createdAt DateTime @default(now())
+
   @@unique([workerId, territoryId])
   @@index([territoryId, active])
 }
 
 model PartnerMarket {
-  id        String @id @default(cuid())
+  id        String              @id @default(cuid())
   partnerId String
   partner   PartnerOrganization @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   marketId  String
-  market    LaunchMarket @relation(fields: [marketId], references: [id], onDelete: Cascade)
-  active    Boolean @default(true)
-  createdAt DateTime @default(now())
+  market    LaunchMarket        @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  active    Boolean             @default(true)
+  createdAt DateTime            @default(now())
+
   @@unique([partnerId, marketId])
 }
 
@@ -2371,17 +2415,18 @@ model PartnerMarket {
 // never implicitly grant PLATFORM-wide reach — enforcement lives in
 // lib/market-access.ts, not in the shape of this table alone.
 model AdminAssignment {
-  id          String @id @default(cuid())
+  id          String        @id @default(cuid())
   userId      String
-  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   scope       AdminScope
   state       String?
   marketId    String?
   market      LaunchMarket? @relation(fields: [marketId], references: [id], onDelete: Cascade)
   territoryId String?
-  territory   Territory? @relation(fields: [territoryId], references: [id], onDelete: Cascade)
-  active      Boolean @default(true)
-  createdAt   DateTime @default(now())
+  territory   Territory?    @relation(fields: [territoryId], references: [id], onDelete: Cascade)
+  active      Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+
   @@index([userId, active])
   @@index([marketId])
   @@index([territoryId])
@@ -2391,11 +2436,11 @@ model AdminAssignment {
 // territory (see lib/pricing-resolver.ts). Null fields fall through to the
 // next-broader layer rather than forcing every market to restate every fee.
 model MarketPricingRule {
-  id          String @id @default(cuid())
+  id          String       @id @default(cuid())
   marketId    String
   market      LaunchMarket @relation(fields: [marketId], references: [id], onDelete: Cascade)
   territoryId String?
-  territory   Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  territory   Territory?   @relation(fields: [territoryId], references: [id], onDelete: SetNull)
 
   scheduledFeeCents      Int?
   urgentFeeCents         Int?
@@ -2408,12 +2453,13 @@ model MarketPricingRule {
   // for a market) is the only source of truth for what a job pays movers.
   moverHourlyRateCents   Int?
   boxTruckFeeCents       Int?
-  semiFeePercent         Decimal? @db.Decimal(5,2)
+  semiFeePercent         Decimal? @db.Decimal(5, 2)
   semiFeeCapCents        Int?
 
   effectiveAt DateTime
   expiresAt   DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
+
   @@index([marketId, effectiveAt])
   @@index([territoryId, effectiveAt])
 }
@@ -2447,7 +2493,7 @@ enum TerritoryType {
 // recipient's future payable balance instead of altering what already
 // happened. See lib/bonus-ledger.ts.
 model BonusLedgerEntry {
-  id           String @id @default(cuid())
+  id           String     @id @default(cuid())
   bonusAwardId String
   bonusAward   BonusAward @relation(fields: [bonusAwardId], references: [id], onDelete: Restrict)
 
@@ -2466,12 +2512,13 @@ model BonusLedgerEntry {
   payout   Payout? @relation(fields: [payoutId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
-  @@index([bonusAwardId, createdAt])
+
   // Idempotent per (bonus award, Stripe event) pair, not per event alone —
   // one refund can affect several bonus awards tied to the same job/load,
   // and each needs its own recovery entry, not just the first one.
   @@unique([bonusAwardId, stripeEventId, type])
   @@unique([payoutId, type])
+  @@index([bonusAwardId, createdAt])
 }
 
 enum BonusLedgerEntryType {
@@ -2486,67 +2533,67 @@ enum BonusLedgerEntryType {
 // PUBLIC-SAFE group; the sensitive group is readable only by the shipper who
 // posted it, an assigned/verified carrier, or an admin.
 model CarrierRoute {
-  id                    String @id @default(cuid())
+  id                    String               @id @default(cuid())
   partnerOrganizationId String?
   partnerOrganization   PartnerOrganization? @relation(fields: [partnerOrganizationId], references: [id], onDelete: SetNull)
   postedByUserId        String?
-  postedByUser          User? @relation("PostedLoads", fields: [postedByUserId], references: [id], onDelete: SetNull)
+  postedByUser          User?                @relation("PostedLoads", fields: [postedByUserId], references: [id], onDelete: SetNull)
 
   // --- PUBLIC-SAFE fields: safe to return from the public load board ---
-  title               String
-  visibility          RouteVisibility @default(PUBLIC_PREVIEW)
-  status              LoadStatus @default(OPEN)
-  originCity          String
-  originState         String
-  originZip           String?
-  originMarketId        String?
-  originMarket          LaunchMarket? @relation("RouteOrigin", fields: [originMarketId], references: [id], onDelete: SetNull)
-  originTerritoryId     String?
-  originTerritory       Territory?    @relation("RouteOriginTerritory", fields: [originTerritoryId], references: [id], onDelete: SetNull)
-  originLatitude        Decimal? @db.Decimal(9,6)
-  originLongitude       Decimal? @db.Decimal(9,6)
-  needsManualGeoReview  Boolean  @default(false)
-  destinationCity     String
-  destinationState    String
-  destinationMarketId   String?
-  destinationMarket     LaunchMarket? @relation("RouteDestination", fields: [destinationMarketId], references: [id], onDelete: SetNull)
-  destinationTerritoryId String?
-  destinationTerritory   Territory?  @relation("RouteDestinationTerritory", fields: [destinationTerritoryId], references: [id], onDelete: SetNull)
-  destinationLatitude    Decimal? @db.Decimal(9,6)
-  destinationLongitude   Decimal? @db.Decimal(9,6)
-  equipmentType       VehicleType
-  detailedEquipmentType EquipmentType?
+  title                   String
+  visibility              RouteVisibility     @default(PUBLIC_PREVIEW)
+  status                  LoadStatus          @default(OPEN)
+  originCity              String
+  originState             String
+  originZip               String?
+  originMarketId          String?
+  originMarket            LaunchMarket?       @relation("RouteOrigin", fields: [originMarketId], references: [id], onDelete: SetNull)
+  originTerritoryId       String?
+  originTerritory         Territory?          @relation("RouteOriginTerritory", fields: [originTerritoryId], references: [id], onDelete: SetNull)
+  originLatitude          Decimal?            @db.Decimal(9, 6)
+  originLongitude         Decimal?            @db.Decimal(9, 6)
+  needsManualGeoReview    Boolean             @default(false)
+  destinationCity         String
+  destinationState        String
+  destinationMarketId     String?
+  destinationMarket       LaunchMarket?       @relation("RouteDestination", fields: [destinationMarketId], references: [id], onDelete: SetNull)
+  destinationTerritoryId  String?
+  destinationTerritory    Territory?          @relation("RouteDestinationTerritory", fields: [destinationTerritoryId], references: [id], onDelete: SetNull)
+  destinationLatitude     Decimal?            @db.Decimal(9, 6)
+  destinationLongitude    Decimal?            @db.Decimal(9, 6)
+  equipmentType           VehicleType
+  detailedEquipmentType   EquipmentType?
   // Provider tracking for external load-board sourced freight. INTERNAL
   // (the default) means this load originated on TempMovers' own
   // marketplace — the primary source per the box-truck/final-mile strategy.
   // The unique constraint below is the actual dedup enforcement: two syncs
   // of the same external load can never create two CarrierRoute rows.
-  sourceProvider      LoadBoardProvider @default(INTERNAL)
-  externalLoadId      String?
-  externalSyncStatus  ExternalSyncStatus @default(NOT_SYNCED)
-  lastSyncedAt        DateTime?
-  pickupDate          DateTime
-  estimatedHoursOrMiles String
-  stopCount           Int @default(0)
-  liftgateRequired    Boolean @default(false)
-  cdlRequired         Boolean @default(false)
-  isLocalRoute         Boolean @default(false)
-  grossCarrierCents   Int
+  sourceProvider          LoadBoardProvider   @default(INTERNAL)
+  externalLoadId          String?
+  externalSyncStatus      ExternalSyncStatus  @default(NOT_SYNCED)
+  lastSyncedAt            DateTime?
+  pickupDate              DateTime
+  estimatedHoursOrMiles   String
+  stopCount               Int                 @default(0)
+  liftgateRequired        Boolean             @default(false)
+  cdlRequired             Boolean             @default(false)
+  isLocalRoute            Boolean             @default(false)
+  grossCarrierCents       Int
   // Which pricing model produced grossCarrierCents. Business decision: box-truck
   // and semi owner-operators are paid a flat guaranteed amount per load, not an
   // hourly wage — they supply their own truck, fuel, insurance, and maintenance.
   // HOURLY stays available only for a driver-only booking where the customer
   // supplies the truck — see serviceType, which is what actually enforces that
   // HOURLY can't be selected for a normal owner-operator load.
-  pricingModel        FreightPricingModel @default(FLAT_RATE)
-  serviceType         FreightServiceType  @default(OWNER_OPERATOR_BOX_TRUCK)
+  pricingModel            FreightPricingModel @default(FLAT_RATE)
+  serviceType             FreightServiceType  @default(OWNER_OPERATOR_BOX_TRUCK)
   // How this load's platform fee relates to price/payout, frozen at posting.
   // ADD_TO_CUSTOMER: grossCarrierCents is the carrier's full gross; customer
   // pays gross + fee. DEDUCT_FROM_PROVIDER: grossCarrierCents is the carrier's
   // NET (posted price - fee); customer pays the posted price. Self-describing
   // for settlement/refund/audit.
-  feeModel            FeeModel @default(DEDUCT_FROM_PROVIDER)
-  platformFeeCents    Int
+  feeModel                FeeModel            @default(DEDUCT_FROM_PROVIDER)
+  platformFeeCents        Int
   // Explicit, self-describing money breakdown (handoff requirement) so every
   // consumer and report reads a stored value rather than re-deriving it:
   //   grossLoadAmountCents  — the full load/gross figure the pricing used
@@ -2559,104 +2606,118 @@ model CarrierRoute {
   // Invariant: customerTotalCents - carrierNetPayoutCents == platformFeeCents
   // (plus customer-side accessorials/urgent, which raise customerTotalCents
   // only). All integer cents.
-  grossLoadAmountCents  Int @default(0)
-  carrierNetPayoutCents Int @default(0)
-  customerTotalCents    Int @default(0)
+  grossLoadAmountCents    Int                 @default(0)
+  carrierNetPayoutCents   Int                 @default(0)
+  customerTotalCents      Int                 @default(0)
   // Detention/waiting is billed separately from the base flat rate, not folded
   // into it — a load that runs long at the dock shouldn't silently absorb that
   // time into what was quoted as a fixed price.
-  waitTimeIncludedMinutes Int @default(60)
-  waitTimeRateCents       Int @default(0)
-  accessorialsCents       Int @default(0)
+  waitTimeIncludedMinutes Int                 @default(60)
+  waitTimeRateCents       Int                 @default(0)
+  accessorialsCents       Int                 @default(0)
 
   // Detention/waiting-time tracking. calculateDetention() in lib/pricing.ts
   // computes detentionCents from these once actualWaitTimeMinutes is known;
   // nothing here automatically modifies a PaymentIntent — see that
   // function's doc comment for why this is deliberately left as a
   // calculation only, not a capture action.
-  arrivedAt             DateTime?
-  loadingStartedAt      DateTime?
-  departedPickupAt      DateTime?
-  arrivedDeliveryAt     DateTime?
-  actualWaitTimeMinutes Int?
-  detentionCents        Int @default(0)
-  detentionApprovedAt   DateTime?
-  detentionApprovedById String?
-  detentionCharges      DetentionCharge[]
-  partnerInvoiceLine    PartnerInvoiceLine?
+  arrivedAt        DateTime?
+  loadingStartedAt DateTime?
+  departedPickupAt DateTime?
+
+  // BLOCK-05 — VASRUE Digital Media, 24 Oct 2026.
+  // deliveredAt was referenced by four files (settlement eligibility, invoice
+  // eligibility, the settlement preview and the partner invoice route) but was
+  // never declared. It is NOT a duplicate of arrivedDeliveryAt above: arriving
+  // at the delivery site is not the same event as completing the delivery, and
+  // invoice/settlement periods are billing boundaries, so conflating the two
+  // would bill a route into the wrong period. The Notification model already
+  // uses this exact `status: DELIVERED` + `deliveredAt` idiom, so this is the
+  // codebase's own established convention, not a new one.
+  // Stamped in app/api/loads/[loadId]/status/route.ts on the transition to
+  // DELIVERED. Nullable and additive: existing rows stay valid.
+  deliveredAt                     DateTime?
+  arrivedDeliveryAt               DateTime?
+  actualWaitTimeMinutes           Int?
+  detentionCents                  Int                  @default(0)
+  detentionApprovedAt             DateTime?
+  detentionApprovedById           String?
+  detentionCharges                DetentionCharge[]
+  partnerInvoiceLine              PartnerInvoiceLine?
   // Not yet enforced anywhere — added so either answer to "does the
   // customer need to approve detention before it's charged" is ready to
   // wire in once decided, without another schema migration. See README.
-  detentionCustomerApprovedAt   DateTime?
-  detentionCustomerApprovedById String?
+  detentionCustomerApprovedAt     DateTime?
+  detentionCustomerApprovedById   String?
   // If the commercial agreement authorizes automatic detention billing
   // instead, that consent should be recorded here at booking time, not
   // inferred after the fact.
   detentionAutoBillingConsentedAt DateTime?
-  stripePaymentIntentId String?       @unique
-  paymentStatus         PaymentStatus @default(REQUIRES_PAYMENT_METHOD)
-  paymentAttempts       PaymentAttempt[]
-  paymentTransactions   PaymentTransaction[]
-  tips                  Tip[]
+  stripePaymentIntentId           String?              @unique
+  paymentStatus                   PaymentStatus        @default(REQUIRES_PAYMENT_METHOD)
+  paymentAttempts                 PaymentAttempt[]
+  paymentTransactions             PaymentTransaction[]
+  tips                            Tip[]
 
-  exactPickupAddress    String?
-  exactDeliveryAddress  String?
-  shipperContactName    String?
-  shipperContactPhone   String?
-  commodityDescription  String?
-  accessCode            String?
-  privateDocumentUrl    String?
+  exactPickupAddress   String?
+  exactDeliveryAddress String?
+  shipperContactName   String?
+  shipperContactPhone  String?
+  commodityDescription String?
+  accessCode           String?
+  privateDocumentUrl   String?
 
   // --- Assignment / fulfillment (visible to assigned carrier + admin only) ---
-  assignedWorkerId    String?
-  assignedWorker      WorkerProfile? @relation(fields: [assignedWorkerId], references: [id], onDelete: SetNull)
+  assignedWorkerId           String?
+  assignedWorker             WorkerProfile? @relation(fields: [assignedWorkerId], references: [id], onDelete: SetNull)
   assignedDriverContactPhone String?
-  requiresDotMcVerification Boolean @default(true)
-  proofOfDeliveryUrl  String?
-  signatureUrl         String?
-  settlementId          String?
-  settlement            Settlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  requiresDotMcVerification  Boolean        @default(true)
+  proofOfDeliveryUrl         String?
+  signatureUrl               String?
+  settlementId               String?
+  settlement                 Settlement?    @relation(fields: [settlementId], references: [id], onDelete: SetNull)
 
   externalSource      String?
   externalReference   String?
   invitations         CarrierRouteInvitation[]
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  bookingAccessorials BookingAccessorial[]
+
+  @@unique([sourceProvider, externalLoadId])
   @@index([visibility, status])
   @@index([originMarketId, status])
   @@index([destinationMarketId])
-  bookingAccessorials BookingAccessorial[]
-  @@unique([sourceProvider, externalLoadId])
   @@index([sourceProvider, externalSyncStatus])
   @@index([equipmentType, isLocalRoute])
 }
 
 model Settlement {
-  id            String   @id @default(cuid())
-  workerId      String
-  worker        WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  periodStart   DateTime
-  periodEnd     DateTime
-  loadsSettled  Int      @default(0)
-  grossCents    Int      @default(0)
-  adjustmentsCents Int   @default(0)
-  netCents      Int      @default(0)
-  status        PayoutStatus @default(PENDING)
-  approvedAt    DateTime?
-  approvedById  String?
-  stripeTransferId String? @unique
-  idempotencyKey   String? @unique
-  paidAt        DateTime?
+  id               String                    @id @default(cuid())
+  workerId         String
+  worker           WorkerProfile             @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  periodStart      DateTime
+  periodEnd        DateTime
+  loadsSettled     Int                       @default(0)
+  grossCents       Int                       @default(0)
+  adjustmentsCents Int                       @default(0)
+  netCents         Int                       @default(0)
+  status           PayoutStatus              @default(PENDING)
+  approvedAt       DateTime?
+  approvedById     String?
+  stripeTransferId String?                   @unique
+  idempotencyKey   String?                   @unique
+  paidAt           DateTime?
   // Distinct from paidAt above (set at TRANSFERRED time) — this is the
   // true bank-arrival confirmation from payout.paid.
-  paidOutAt     DateTime?
-  stripePayoutId String?
-  failedAt      DateTime?
-  failureReason String?
-  reversedAt    DateTime?
-  createdAt     DateTime @default(now())
-  loads         CarrierRoute[]
-  detentionLines SettlementDetentionLine[]
+  paidOutAt        DateTime?
+  stripePayoutId   String?
+  failedAt         DateTime?
+  failureReason    String?
+  reversedAt       DateTime?
+  createdAt        DateTime                  @default(now())
+  loads            CarrierRoute[]
+  detentionLines   SettlementDetentionLine[]
 }
 
 // Stripe redelivers webhook events on any non-2xx response or timeout, and the
@@ -2671,14 +2732,14 @@ model Settlement {
 // through (e.g. the DB write for a refund) could silently lose that update
 // forever, since the retry would see the row and bail out.
 model ProcessedStripeEvent {
-  id           String   @id
+  id           String                      @id
   type         String
   status       StripeEventProcessingStatus
-  attemptCount Int      @default(1)
+  attemptCount Int                         @default(1)
   lastError    String?
-  startedAt    DateTime @default(now())
+  startedAt    DateTime                    @default(now())
   completedAt  DateTime?
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime                    @updatedAt
 }
 
 enum StripeEventProcessingStatus {
@@ -2688,57 +2749,58 @@ enum StripeEventProcessingStatus {
 }
 
 model FeatureFlag {
-  id          String @id @default(cuid())
-  key         String @unique
-  enabled     Boolean @default(false)
-  description String?
+  id                  String            @id @default(cuid())
+  key                 String            @unique
+  enabled             Boolean           @default(false)
+  description         String?
   // Feature-flag framework (future-development extension points). Targeting
   // is ADDITIVE and OFF by default: a flag is on for a request only when
   // `enabled` is true AND the request matches any configured targeting (an
   // empty/naked list means "no restriction on that dimension"). All future
   // features ship disabled; nothing here touches booking/payment/settlement/
   // reconciliation — the gate is read-only advisory that callers opt into.
-  status          FeatureFlagStatus @default(DISABLED)
-  enabledEnvironments String[]  // e.g. ["development","staging"] — empty = any env
-  enabledMarkets      String[]  // LaunchMarket ids — empty = all markets
+  status              FeatureFlagStatus @default(DISABLED)
+  enabledEnvironments String[] // e.g. ["development","staging"] — empty = any env
+  enabledMarkets      String[] // LaunchMarket ids — empty = all markets
   enabledRoles        UserRole[] // empty = all roles
-  enabledServiceTypes String[]  // e.g. ["MOVING","SEMI"] — empty = all
-  enabledPilotGroups  String[]  // arbitrary cohort tags — empty = none required
-  configuration   Json?         // per-feature config blob (opaque to the gate)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  enabledServiceTypes String[] // e.g. ["MOVING","SEMI"] — empty = all
+  enabledPilotGroups  String[] // arbitrary cohort tags — empty = none required
+  configuration       Json? // per-feature config blob (opaque to the gate)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 }
 
 enum FeatureFlagStatus {
-  DISABLED   // hard off regardless of targeting
-  PILOT      // on only for matching pilot groups / targeting
-  ENABLED    // on where targeting matches (or everywhere if no targeting)
+  DISABLED // hard off regardless of targeting
+  PILOT // on only for matching pilot groups / targeting
+  ENABLED // on where targeting matches (or everywhere if no targeting)
 }
 
 model AuditLog {
-  id          String   @id @default(cuid())
-  actorId     String?
-  actor       User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
-  jobId       String?
-  job         Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  action      String
-  entityType  String
-  entityId    String?
-  details     Json?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  jobId      String?
+  job        Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
 }
 
 model Session {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash    String   @unique
-  role         UserRole
-  expiresAt    DateTime
-  revokedAt    DateTime?
-  ipAddress    String?
-  userAgent    String?
-  createdAt    DateTime @default(now())
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  role      UserRole
+  expiresAt DateTime
+  revokedAt DateTime?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
   @@index([userId, expiresAt])
 }
 
@@ -2778,29 +2840,29 @@ enum BookingAccessorialStatus {
 // The catalog: WHAT can be charged + stable, non-price configuration.
 // Pricing (rate + band + effective dates) lives in AccessorialMarketPrice.
 model AccessorialType {
-  id                 String   @id @default(cuid())
-  key                String   @unique
+  id                 String                    @id @default(cuid())
+  key                String                    @unique
   label              String
   serviceScope       AccessorialServiceScope[]
   pricingShape       AccessorialPricingShape
   platformShareMode  PlatformShareMode
-  platformShareValue Int      // cents (FLAT_CENTS) or percent (PERCENT_OF_CHARGE)
+  platformShareValue Int // cents (FLAT_CENTS) or percent (PERCENT_OF_CHARGE)
   platformCapCents   Int?
   // Tax config: P0 STORES taxability; it does NOT compute tax.
-  isTaxable          Boolean  @default(false)
+  isTaxable          Boolean                   @default(false)
   taxRuleCode        String?
   // Accounting/reporting.
   ledgerCode         String?
   reportingCategory  String?
   // Workflow flags (P1 workflow consumes these).
-  requiresApproval   Boolean  @default(false)
-  requiresEvidence   Boolean  @default(false)
-  isActive           Boolean  @default(true)
-  displayOrder       Int      @default(0)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  requiresApproval   Boolean                   @default(false)
+  requiresEvidence   Boolean                   @default(false)
+  isActive           Boolean                   @default(true)
+  displayOrder       Int                       @default(0)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
-  marketPrices       AccessorialMarketPrice[]
+  marketPrices        AccessorialMarketPrice[]
   bookingAccessorials BookingAccessorial[]
 
   @@index([isActive, displayOrder])
@@ -2809,14 +2871,14 @@ model AccessorialType {
 // Per-market, effective-dated pricing for one accessorial. The resolver
 // selects exactly one row for a booking's market + acceptance date.
 model AccessorialMarketPrice {
-  id                 String   @id @default(cuid())
-  accessorialTypeId  String
-  accessorialType    AccessorialType @relation(fields: [accessorialTypeId], references: [id], onDelete: Cascade)
+  id                String          @id @default(cuid())
+  accessorialTypeId String
+  accessorialType   AccessorialType @relation(fields: [accessorialTypeId], references: [id], onDelete: Cascade)
   // NULL marketId = national/default fallback row.
-  marketId           String?
-  market             LaunchMarket? @relation(fields: [marketId], references: [id], onDelete: Cascade)
-  territoryId        String?
-  territory          Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  marketId          String?
+  market            LaunchMarket?   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  territoryId       String?
+  territory         Territory?      @relation(fields: [territoryId], references: [id], onDelete: SetNull)
 
   // The ACTIVE rate the engine charges + advisory band.
   customerRateCents     Int
@@ -2825,18 +2887,18 @@ model AccessorialMarketPrice {
   minimumPrice          Int?
   maximumPrice          Int?
 
-  effectiveFrom      DateTime
-  effectiveTo        DateTime?
-  version            Int      @default(1)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  version       Int       @default(1)
 
   // Role-based band override (Super/Finance admin only; enforced server-side).
-  bandOverride       Boolean  @default(false)
+  bandOverride       Boolean @default(false)
   bandOverrideReason String?
 
-  isPublished        Boolean  @default(false)
-  createdByUserId    String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  isPublished     Boolean  @default(false)
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([accessorialTypeId, marketId, effectiveFrom])
   @@index([accessorialTypeId, isPublished])
@@ -2844,13 +2906,13 @@ model AccessorialMarketPrice {
 
 // An accessorial actually applied to a booking, with a FROZEN price snapshot.
 model BookingAccessorial {
-  id                 String   @id @default(cuid())
-  jobId              String?
-  job                Job?     @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  loadId             String?
-  load               CarrierRoute? @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  accessorialTypeId  String
-  accessorialType    AccessorialType @relation(fields: [accessorialTypeId], references: [id])
+  id                String          @id @default(cuid())
+  jobId             String?
+  job               Job?            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  loadId            String?
+  load              CarrierRoute?   @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  accessorialTypeId String
+  accessorialType   AccessorialType @relation(fields: [accessorialTypeId], references: [id])
 
   // Frozen catalog + pricing snapshot (immutable once applied).
   typeKeySnapshot            String
@@ -2860,27 +2922,27 @@ model BookingAccessorial {
   platformShareValueSnapshot Int
   platformCapCentsSnapshot   Int?
 
-  quantity           Decimal  @default(1) @db.Decimal(12, 4)
+  quantity            Decimal @default(1) @db.Decimal(12, 4)
   customerChargeCents Int
-  platformShareCents Int
-  providerShareCents Int
+  platformShareCents  Int
+  providerShareCents  Int
 
   // Price source (audit trail): which AccessorialMarketPrice row produced this.
-  priceSourceMarketId       String?
-  priceSourceVersion        Int
-  priceSourceEffectiveFrom  DateTime
+  priceSourceMarketId      String?
+  priceSourceVersion       Int
+  priceSourceEffectiveFrom DateTime
 
   // Frozen tax/ledger for exports.
-  isTaxableSnapshot  Boolean  @default(false)
+  isTaxableSnapshot  Boolean @default(false)
   ledgerCodeSnapshot String?
 
-  status             BookingAccessorialStatus @default(PROPOSED)
-  approvedByUserId   String?
-  approvedAt         DateTime?
-  evidenceUrls       String[]
+  status           BookingAccessorialStatus @default(PROPOSED)
+  approvedByUserId String?
+  approvedAt       DateTime?
+  evidenceUrls     String[]
 
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([jobId, status])
   @@index([loadId, status])
@@ -2916,74 +2978,86 @@ enum FreightLoadStatus {
 }
 
 model FreightLoad {
-  id                    String   @id @default(cuid())
-  status                FreightLoadStatus @default(DRAFT)
-  version               Int      @default(1)   // bumped on material term changes
-  marketId              String?
-  shipperUserId         String?
+  // BLOCK-05 — VASRUE Digital Media, 24 October 2026.
+  // The shipper load-tracking endpoint selects proofOfDeliveryUrl from
+  // FreightLoad, while the column existed only on CarrierRoute. Adding it here
+  // leaves the querying code untouched and does not disturb CarrierRoute, which
+  // has its own legitimate use of the same concept.
+  // Nullable and additive. Applied in migration 20261024220000.
+  proofOfDeliveryUrl         String?
+  id                         String                   @id @default(cuid())
+  status                     FreightLoadStatus        @default(DRAFT)
+  version                    Int                      @default(1) // bumped on material term changes
+  marketId                   String?
+  shipperUserId              String?
   // Commodity / equipment
-  commodity             String?
-  weightLbs             Int?
-  palletCount           Int?
-  equipmentType         String?
-  loadRequirements      String?
+  commodity                  String?
+  weightLbs                  Int?
+  palletCount                Int?
+  equipmentType              String?
+  loadRequirements           String?
   // Financials — integer cents ONLY.
-  customerLinehaulCents      Int @default(0)
-  customerFuelSurchargeCents Int @default(0)
-  customerAccessorialsCents  Int @default(0)
-  customerTotalCents         Int @default(0)
-  carrierLinehaulCents       Int @default(0)
-  carrierFuelSurchargeCents  Int @default(0)
-  carrierAccessorialsCents   Int @default(0)
-  carrierTotalCents          Int @default(0)
-  grossMarginCents           Int @default(0)
-  processingFeesCents        Int @default(0)
-  platformRevenueCents       Int @default(0)
+  customerLinehaulCents      Int                      @default(0)
+  customerFuelSurchargeCents Int                      @default(0)
+  customerAccessorialsCents  Int                      @default(0)
+  customerTotalCents         Int                      @default(0)
+  carrierLinehaulCents       Int                      @default(0)
+  carrierFuelSurchargeCents  Int                      @default(0)
+  carrierAccessorialsCents   Int                      @default(0)
+  carrierTotalCents          Int                      @default(0)
+  grossMarginCents           Int                      @default(0)
+  processingFeesCents        Int                      @default(0)
+  platformRevenueCents       Int                      @default(0)
   // Assignment
-  assignedCarrierId     String?
+  assignedCarrierId          String?
   // Idempotency for creation.
-  creationKey           String?  @unique
-  createdById           String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  stops                 FreightStop[]
-  offers                CarrierOffer[]
-  amendments            LoadFinancialAmendment[]
-  rateConfirmations     RateConfirmation[]
-  accessorials          LoadAccessorial[]
-  auditEvents           FreightAuditEvent[]
-  invoices              CustomerInvoice[]
-  settlements           CarrierSettlement[]
+  creationKey                String?                  @unique
+  createdById                String?
+  createdAt                  DateTime                 @default(now())
+  updatedAt                  DateTime                 @updatedAt
+  stops                      FreightStop[]
+  offers                     CarrierOffer[]
+  amendments                 LoadFinancialAmendment[]
+  rateConfirmations          RateConfirmation[]
+  accessorials               LoadAccessorial[]
+  auditEvents                FreightAuditEvent[]
+  invoices                   CustomerInvoice[]
+  settlements                CarrierSettlement[]
+
   @@index([status, marketId])
   @@index([assignedCarrierId])
 }
 
 model FreightStop {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   loadId        String
   load          FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
   sequence      Int
-  stopType      String   // PICKUP | DELIVERY | STOP
+  stopType      String // PICKUP | DELIVERY | STOP
   city          String?
   state         String?
   zip           String?
   appointmentAt DateTime?
+
   @@index([loadId, sequence])
 }
 
-/** Versioned financial amendment — agreed rates are never silently overwritten. */
+/**
+ * Versioned financial amendment — agreed rates are never silently overwritten.
+ */
 model LoadFinancialAmendment {
-  id            String   @id @default(cuid())
-  loadId        String
-  load          FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  version       Int
-  reason        String?
+  id                 String      @id @default(cuid())
+  loadId             String
+  load               FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  version            Int
+  reason             String?
   customerTotalCents Int
   carrierTotalCents  Int
   grossMarginCents   Int
-  createdById   String
-  acknowledgedAt DateTime?
-  createdAt     DateTime @default(now())
+  createdById        String
+  acknowledgedAt     DateTime?
+  createdAt          DateTime    @default(now())
+
   @@unique([loadId, version])
 }
 
@@ -2998,41 +3072,43 @@ enum CarrierOfferStatus {
 }
 
 model CarrierOffer {
-  id                String   @id @default(cuid())
-  loadId            String
-  load              FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  carrierId         String
-  offeredRateCents  Int
-  status            CarrierOfferStatus @default(PENDING)
-  expiresAt         DateTime
-  sentAt            DateTime @default(now())
-  viewedAt          DateTime?
-  respondedAt       DateTime?
-  declineReason     String?
-  eligibilitySnapshot Json?   // structured result captured at offer time
-  version           Int      @default(1)
+  id                  String             @id @default(cuid())
+  loadId              String
+  load                FreightLoad        @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  carrierId           String
+  offeredRateCents    Int
+  status              CarrierOfferStatus @default(PENDING)
+  expiresAt           DateTime
+  sentAt              DateTime           @default(now())
+  viewedAt            DateTime?
+  respondedAt         DateTime?
+  declineReason       String?
+  eligibilitySnapshot Json? // structured result captured at offer time
+  version             Int                @default(1)
   // At most one ACCEPTED offer per load — enforced in the accept transaction.
-  createdAt         DateTime @default(now())
+  createdAt           DateTime           @default(now())
+
   @@index([loadId, status])
   @@index([carrierId, status])
 }
 
 model RateConfirmation {
-  id            String   @id @default(cuid())
-  loadId        String
-  load          FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  loadVersion   Int
-  carrierId     String
+  id                     String      @id @default(cuid())
+  loadId                 String
+  load                   FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  loadVersion            Int
+  carrierId              String
   agreedCarrierRateCents Int
-  equipment     String?
-  commodity     String?
-  paymentTerms  String?
-  documentRequirements String?
+  equipment              String?
+  commodity              String?
+  paymentTerms           String?
+  documentRequirements   String?
   cancellationProvisions String?
-  signedDocumentId String?
-  generatedAt   DateTime @default(now())
-  acceptedAt    DateTime?
-  version       Int      @default(1)
+  signedDocumentId       String?
+  generatedAt            DateTime    @default(now())
+  acceptedAt             DateTime?
+  version                Int         @default(1)
+
   @@index([loadId, version])
 }
 
@@ -3056,20 +3132,21 @@ enum AccessorialApprovalStatus {
 }
 
 model LoadAccessorial {
-  id                 String   @id @default(cuid())
-  loadId             String
-  load               FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  kind               AccessorialKind
+  id                   String                    @id @default(cuid())
+  loadId               String
+  load                 FreightLoad               @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  kind                 AccessorialKind
   requestedAmountCents Int
   approvedAmountCents  Int?
   supportingDocumentId String?
-  requestedById      String
-  approvalStatus     AccessorialApprovalStatus @default(REQUESTED)
-  approvedById       String?
-  customerBillable   Boolean @default(false)
-  carrierPayable     Boolean @default(false)
-  reason             String?
-  createdAt          DateTime @default(now())
+  requestedById        String
+  approvalStatus       AccessorialApprovalStatus @default(REQUESTED)
+  approvedById         String?
+  customerBillable     Boolean                   @default(false)
+  carrierPayable       Boolean                   @default(false)
+  reason               String?
+  createdAt            DateTime                  @default(now())
+
   @@index([loadId, approvalStatus])
 }
 
@@ -3085,20 +3162,21 @@ enum CustomerInvoiceStatus {
 }
 
 model CustomerInvoice {
-  id            String   @id @default(cuid())
-  loadId        String
-  load          FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  invoiceNumber String   @unique
-  chargesCents  Int
-  accessorialsCents Int  @default(0)
-  taxCents      Int      @default(0)
-  totalCents    Int
-  paymentTerms  String?
-  dueDate       DateTime?
-  status        CustomerInvoiceStatus @default(DRAFT)
-  creationKey   String?  @unique   // idempotency
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String                @id @default(cuid())
+  loadId            String
+  load              FreightLoad           @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  invoiceNumber     String                @unique
+  chargesCents      Int
+  accessorialsCents Int                   @default(0)
+  taxCents          Int                   @default(0)
+  totalCents        Int
+  paymentTerms      String?
+  dueDate           DateTime?
+  status            CustomerInvoiceStatus @default(DRAFT)
+  creationKey       String?               @unique // idempotency
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
   @@index([loadId, status])
 }
 
@@ -3110,44 +3188,49 @@ enum CarrierSettlementStatus {
 }
 
 model CarrierSettlement {
-  id            String   @id @default(cuid())
-  loadId        String
-  load          FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  carrierId     String
-  finalAmountCents Int
-  status        CarrierSettlementStatus @default(PENDING)
+  id                  String                  @id @default(cuid())
+  loadId              String
+  load                FreightLoad             @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  carrierId           String
+  finalAmountCents    Int
+  status              CarrierSettlementStatus @default(PENDING)
   // Verified factoring routing applied at settlement time (remit-to snapshot).
-  remitToName   String?
+  remitToName         String?
   paymentAssignmentId String?
-  creationKey   String?  @unique   // idempotency — prevents duplicate settlement
-  approvedById  String?
-  approvedAt    DateTime?
-  paidAt        DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  @@unique([loadId])   // at most one settlement per load
+  creationKey         String?                 @unique // idempotency — prevents duplicate settlement
+  approvedById        String?
+  approvedAt          DateTime?
+  paidAt              DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  @@unique([loadId]) // at most one settlement per load
   @@index([carrierId, status])
 }
 
-/** Append-only freight audit trail. */
+/**
+ * Append-only freight audit trail.
+ */
 model FreightAuditEvent {
-  id            String   @id @default(cuid())
-  loadId        String
-  load          FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
-  event         String   // LOAD_CREATED | STATUS_CHANGED | OFFER_ACCEPTED | ...
-  detail        Json?
-  actorId       String?
-  createdAt     DateTime @default(now())
+  id        String      @id @default(cuid())
+  loadId    String
+  load      FreightLoad @relation(fields: [loadId], references: [id], onDelete: Cascade)
+  event     String // LOAD_CREATED | STATUS_CHANGED | OFFER_ACCEPTED | ...
+  detail    Json?
+  actorId   String?
+  createdAt DateTime    @default(now())
+
   @@index([loadId, createdAt])
 }
 
 model CarrierNote {
-  id         String   @id @default(cuid())
-  carrierId  String
-  carrier    Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  body       String
-  authorId   String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  carrierId String
+  carrier   Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  body      String
+  authorId  String
+  createdAt DateTime @default(now())
+
   @@index([carrierId, createdAt])
 }
 
@@ -3197,7 +3280,7 @@ enum RecruitmentActivityType {
 }
 
 model CarrierProspect {
-  id                  String   @id @default(cuid())
+  id                  String                      @id @default(cuid())
   companyName         String
   contactName         String?
   contactEmail        String?
@@ -3205,40 +3288,44 @@ model CarrierProspect {
   dotNumber           String?
   mcNumber            String?
   equipmentSummary    String?
-  operatingStates     String?  // free-form list, e.g. "IN, IL, OH"
-  recruitmentStage    RecruitmentStage @default(NEW_LEAD)
-  leadSource          LeadSource       @default(OTHER)
+  operatingStates     String? // free-form list, e.g. "IN, IL, OH"
+  recruitmentStage    RecruitmentStage            @default(NEW_LEAD)
+  leadSource          LeadSource                  @default(OTHER)
   referralSource      String?
   assignedRecruiterId String?
-  convertedCarrierId  String?  @unique   // set once on conversion
+  convertedCarrierId  String?                     @unique // set once on conversion
   lastContactAt       DateTime?
   nextFollowUpAt      DateTime?
   createdById         String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
   activities          CarrierRecruitingActivity[]
   tasks               RecruitingTask[]
+
   @@index([recruitmentStage])
   @@index([assignedRecruiterId])
   @@index([dotNumber])
   @@index([mcNumber])
 }
 
-/** Append-only recruiting activity timeline. */
+/**
+ * Append-only recruiting activity timeline.
+ */
 model CarrierRecruitingActivity {
-  id             String   @id @default(cuid())
+  id             String                  @id @default(cuid())
   prospectId     String
-  prospect       CarrierProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  prospect       CarrierProspect         @relation(fields: [prospectId], references: [id], onDelete: Cascade)
   activityType   RecruitmentActivityType
   notes          String?
   performedById  String
-  occurredAt     DateTime @default(now())
+  occurredAt     DateTime                @default(now())
   nextFollowUpAt DateTime?
+
   @@index([prospectId, occurredAt])
 }
 
 model RecruitingTask {
-  id           String   @id @default(cuid())
+  id           String           @id @default(cuid())
   prospectId   String?
   prospect     CarrierProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
   title        String
@@ -3246,7 +3333,8 @@ model RecruitingTask {
   assignedToId String?
   completedAt  DateTime?
   createdById  String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime         @default(now())
+
   @@index([assignedToId, completedAt])
   @@index([dueAt])
 }
@@ -3271,18 +3359,19 @@ enum DispatcherAccessStatus {
 }
 
 model DispatcherCarrierAccess {
-  id             String   @id @default(cuid())
-  dispatcherId   String   // User.id of the dispatcher
-  carrierId      String
-  carrier        Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  status         DispatcherAccessStatus @default(PENDING)
-  permissions    String[] // subset of the permission vocabulary above
-  grantedById    String?  // who granted (carrier owner or admin acting for them)
-  grantedAt      DateTime?
-  revokedAt      DateTime?
-  expiresAt      DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           String                 @id @default(cuid())
+  dispatcherId String // User.id of the dispatcher
+  carrierId    String
+  carrier      Carrier                @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  status       DispatcherAccessStatus @default(PENDING)
+  permissions  String[] // subset of the permission vocabulary above
+  grantedById  String? // who granted (carrier owner or admin acting for them)
+  grantedAt    DateTime?
+  revokedAt    DateTime?
+  expiresAt    DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
   @@unique([dispatcherId, carrierId])
   @@index([dispatcherId, status])
   @@index([carrierId, status])
@@ -3303,7 +3392,7 @@ enum ShipperQuoteRequestStatus {
 }
 
 model ShipperQuoteRequest {
-  id               String   @id @default(cuid())
+  id               String                    @id @default(cuid())
   shipperUserId    String
   originCity       String?
   originState      String?
@@ -3317,7 +3406,8 @@ model ShipperQuoteRequest {
   deliveryDate     String?
   notes            String?
   status           ShipperQuoteRequestStatus @default(PENDING_CONTACT)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
   @@index([shipperUserId, status])
 }

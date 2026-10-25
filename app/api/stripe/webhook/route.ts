@@ -6,6 +6,28 @@ import { recoverBonusesForQualifyingEntity } from "@/lib/bonus-ledger";
 import { queueNotification } from "@/lib/notifications";
 import { subscriptionConfirmationTemplate, subscriptionCancellationTemplate, paymentReceiptTemplate, refundNoticeTemplate, payoutStatusTemplate, tipReceivedTemplate } from "@/lib/email/templates/payments";
 import { captureIntegrationAlert } from "@/lib/monitoring";
+
+// ---------------------------------------------------------------------------
+// BLOCK-05 — VASRUE Digital Media, 24 Oct 2026.
+// Stripe's Basil API removed Invoice.subscription and moved the reference to
+// Invoice.parent.subscription_details.subscription. lib/stripe.ts targets
+// "2025-08-27.basil", so Basil is the correct shape to read here.
+//
+// Worth recording why this is NOT dependency drift, since that was the obvious
+// first explanation: the hypothesis was tested by pinning the tree to the
+// lockfile's own versions, which made the error count worse (34 -> 38) and
+// left these nine untouched. It is a genuine upstream API migration.
+//
+// Centralised in one helper because the same read happens in both the
+// invoice.paid and invoice.payment_failed branches, and a subscription id read
+// wrongly in one branch but not the other would desynchronise a worker's
+// billing state rather than fail visibly.
+// ---------------------------------------------------------------------------
+function invoiceSubscriptionId(inv: Stripe.Invoice): string | null {
+  const sub = inv.parent?.subscription_details?.subscription ?? null;
+  if (!sub) return null;
+  return typeof sub === "string" ? sub : sub.id;
+}
 import { attemptTipAllocation } from "@/lib/tip-split";
 
 /** Maps Stripe's actual payment method type (and wallet, for cards) to our
@@ -487,8 +509,8 @@ async function processStripeEvent(event: Stripe.Event) {
     // PAST_DUE/UNPAID subscription back to current — the
     // customer.subscription.updated event alone doesn't always convey
     // this promptly.
-    if (inv.subscription) {
-      const subscriptionId = typeof inv.subscription === "string" ? inv.subscription : inv.subscription.id;
+    const subscriptionId = invoiceSubscriptionId(inv);
+    if (subscriptionId) {
       await prisma.workerProfile.updateMany({
         where: { stripeSubscriptionId: subscriptionId },
         data: { subscriptionStatus: "ACTIVE" },
@@ -502,8 +524,8 @@ async function processStripeEvent(event: Stripe.Event) {
       where: { stripeInvoiceId: inv.id },
       data: { status: "PAST_DUE" },
     });
-    if (inv.subscription) {
-      const subscriptionId = typeof inv.subscription === "string" ? inv.subscription : inv.subscription.id;
+    const subscriptionId = invoiceSubscriptionId(inv);
+    if (subscriptionId) {
       await prisma.workerProfile.updateMany({
         where: { stripeSubscriptionId: subscriptionId },
         data: { subscriptionStatus: "PAST_DUE" },

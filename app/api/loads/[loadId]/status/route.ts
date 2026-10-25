@@ -37,7 +37,17 @@ export async function POST(request: Request, context: { params: Promise<{ loadId
 
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.carrierRoute.update({
-      where: { id: loadId }, data: { status: parsed.data.status },
+      // VASRUE Digital Media — BLOCK-05, 24 Oct 2026. Stamp deliveredAt on the
+      // transition into DELIVERED. Without this the new column would exist but
+      // never be written, and every settlement/invoice period filter that reads it
+      // would silently match nothing — worse than the original type error, because
+      // it would fail quietly instead of loudly. Set once, on the transition only,
+      // so a later POD_UPLOADED or SETTLED move cannot move the billing date.
+      where: { id: loadId },
+      data: {
+        status: parsed.data.status,
+        ...(parsed.data.status === "DELIVERED" && { deliveredAt: new Date() }),
+      },
       select: { id: true, status: true, updatedAt: true, assignedWorkerId: true },
     });
     if (parsed.data.status === "SETTLED" && result.assignedWorkerId) {

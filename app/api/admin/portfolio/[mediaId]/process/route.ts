@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import type { PortfolioProcessingStatus } from "@prisma/client"; // VASRUE Digital Media — BLOCK-05.
 import { requireRole, AuthError } from "@/lib/auth";
 import { imageProcessingEnabled } from "@/lib/portfolio/feature-flags";
 import { processPortfolioImage } from "@/lib/portfolio/image-processing";
@@ -16,7 +17,12 @@ import { processPortfolioImage } from "@/lib/portfolio/image-processing";
  * PROCESSING items are rejected so a manual call can't double-process or
  * clobber an in-flight run.
  */
-const REPROCESSABLE = ["PENDING", "FAILED"];
+// VASRUE Digital Media — BLOCK-05, 24 Oct 2026. Inferred as string[], which
+// Prisma's `in` filter rejects for an enum column. Typing it against the
+// generated enum also makes an invalid state a compile error rather than a
+// silent no-match at runtime — relevant here, since this guard is the thing
+// stopping a double-process.
+const REPROCESSABLE: PortfolioProcessingStatus[] = ["PENDING", "FAILED"];
 
 export async function POST(request: Request, context: { params: Promise<{ mediaId: string }> }) {
   let authed;

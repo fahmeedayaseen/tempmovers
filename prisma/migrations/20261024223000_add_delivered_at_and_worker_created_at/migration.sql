@@ -1,0 +1,40 @@
+-- ============================================================================
+-- TempMovers — follow-up migration 003
+-- CarrierRoute.deliveredAt + WorkerProfile.createdAt
+--
+-- Prepared by VASRUE Digital Media (Clinton Douglas IV), 24 October 2026.
+-- Contract #2942026-1353 — phase 2A.
+--
+-- WHY THESE TWO COLUMNS MATTER OUT OF PROPORTION TO THEIR SIZE
+--
+-- Two missing columns were the root cause of 17 of the 34 typecheck errors.
+-- Prisma infers a query's result type from the whole query, so a single
+-- undeclared key in a `where` or `orderBy` collapses inference for that query
+-- and makes correctly-written `include`/`select` relations appear not to exist.
+-- The reported errors were therefore mostly downstream noise:
+--
+--   CarrierRoute.deliveredAt   -> 7 direct + 6 cascaded (originMarket)  = 13
+--   WorkerProfile.createdAt    -> 1 direct + 3 cascaded (user)          =  4
+--
+-- Both were measured, not assumed: adding these two lines and regenerating
+-- the client took the count from 34 to 17 with no other change.
+--
+-- deliveredAt is deliberately NOT a reuse of the existing arrivedDeliveryAt.
+-- Arriving at a delivery site is a different event from completing delivery,
+-- and this column sets settlement and invoice period boundaries, so treating
+-- them as one would bill a route into the wrong period. The Notification model
+-- already uses the same `status: DELIVERED` + `deliveredAt` idiom, so this
+-- follows the codebase's own convention. It is written in
+-- app/api/loads/[loadId]/status/route.ts on the transition into DELIVERED.
+--
+-- Safety: purely additive. deliveredAt is nullable with no backfill.
+-- createdAt is NOT NULL with a now() default, which Postgres fills for any
+-- existing rows; acceptable here only because no WorkerProfile rows exist in
+-- production yet. If rows exist before this is applied, backfill from
+-- User.createdAt first. Zero DROP statements. Reversible by dropping both.
+-- ============================================================================
+
+-- AlterTable
+ALTER TABLE "CarrierRoute" ADD COLUMN     "deliveredAt" TIMESTAMP(3);
+-- AlterTable
+ALTER TABLE "WorkerProfile" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
