@@ -216,22 +216,53 @@ something in the tree moved and that is the first thing to investigate:
 
 Measured on Node v26.8.1 / npm 11.19.0.
 
-### Node version — an open discrepancy, stated plainly
+### Node version — resolved, and not the way it was expected to resolve
 
-`package.json` pins `engines.node` to `22.x` and `.nvmrc` says `22`, because
-that is the deployment target. **The baseline above was measured on Node
-v26.8.1**, because no Node version manager is installed on the build machine and
-22.x is not available there.
+Verified on Vercel, 25 Oct 2026, by deploying to a throwaway project
+(`tempmovers-build-verify`, separate from the live `tempmovers` project so the
+holding page could not be affected). The build succeeded: compiled in 33.6s,
+126/126 static pages, `Build Completed [2m]`.
 
-The gates have therefore not been verified on the version that will actually
-run in production. Close this before production GO, by either of:
+**Vercel built on Node 24.x, not the 22.x that `engines.node` declared.** The
+field was simply ignored. Both Vercel projects — the live `tempmovers` and the
+verification project — are set to Node.js Version 24.x, so 24.x is the real
+deployment runtime and always was.
 
-1. Installing a version manager (`nvm-windows`, `fnm`) and re-running the four
-   gates on Node 22.x; or
-2. Letting a Vercel preview deployment build it, which uses `engines.node` and
-   so builds on 22.x in the real target environment.
+A pin the platform ignores is worse than no pin, because it manufactures false
+confidence about what the code was tested on. `engines.node` and `.nvmrc` are
+therefore now `24.x` / `24`, matching the environment the build is actually
+verified green in.
 
-Option 2 is cheaper and tests the real thing. Neither is optional.
+**The Vercel project setting wins over `engines.node`, not the other way round.**
+If the Node version is ever changed, change it in Project Settings; editing
+`package.json` alone will do nothing.
+
+Current verification status:
+
+| Runtime | Where | Result |
+|---|---|---|
+| Node 24.x | Vercel, the real deployment target | **build green**, 126/126 pages |
+| Node 26.8.1 | local build machine | **all four gates green** |
+| Node 22.x | nowhere | not tested, and no longer the target |
+
+The build is green on two different Node majors, which is better evidence of
+version robustness than a single pinned run would have been.
+
+### The build needs no environment variables at all
+
+Worth stating because it is unusual and it is a direct result of the BLOCK-09
+fix. `next build` completes with **no `.env` present whatsoever** — verified
+locally by setting the file aside, and verified again on Vercel, where the
+verification project has zero environment variables configured.
+
+This matters for deployment: no CI system and no build pipeline needs to be
+handed a single secret in order to compile this application. Before BLOCK-09 it
+could not be built at all without a live Stripe key.
+
+Vercel's build also ran a clean dependency install from the lockfile in a fresh
+container with `Previous build caches not available`, which is an independent
+confirmation of the reproducibility claim above — a different machine, a
+different Node major, a cold cache, and the same successful build.
 
 ### Install scripts
 

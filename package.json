@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "next dev",
@@ -54,5 +54,6 @@
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^2.1.0"
-  }
+  },
+  "_vasrue_note_node_version": "BLOCK-13 - VASRUE Digital Media, 25 Oct 2026. engines.node was 22.x, which nothing honoured. Verified by deploying to Vercel: the build ran on Node 24.x, and both Vercel projects (tempmovers and tempmovers-build-verify) are set to 24.x, so 24.x is the actual deployment runtime. A pin that the platform ignores is worse than no pin because it manufactures false confidence about what the code was tested on. Set to 24.x to match the environment the build is actually verified green in. If this is ever moved back, change the Vercel project's Node.js Version setting too - that setting wins over this field, not the other way round."
 }
