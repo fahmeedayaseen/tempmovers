@@ -175,3 +175,123 @@ neon branches list --project-id frosty-feather-79812865
 ```
 
 Full evidence for every claim here is in the checkpoint evidence packet and work log supplied alongside this document.
+
+---
+
+## 10. Reproducible installs — read this before installing anything
+
+**Always `npm ci`. Never `npm install`.**
+
+This is not a style preference. `npm install` re-resolves the `^` ranges in
+`package.json` and may write a different tree than the one that was tested; all
+26 top-level dependencies use ranges. `npm ci` installs strictly from
+`package-lock.json` and will not modify it. The symptom when this goes wrong is
+a typecheck count that moves on its own: 34 errors were measured one day and 37
+the next with no source change, which is what made the error list untrustworthy
+in the first place.
+
+```bash
+npm ci          # correct. ~4.5 min cold on this project
+npm install     # only when deliberately changing a dependency
+```
+
+Verified 25 Oct 2026: `npm ci` completed with exit 0 and left
+`package-lock.json` byte-for-byte identical, which is the proof the lockfile is
+authoritative. The lockfile holds 618 packages, every one with both a `resolved`
+URL and an `integrity` hash, and all 618 resolve to `registry.npmjs.org`. None
+still point at the internal proxy host that made the original lockfile unusable
+(BLOCK-01).
+
+### The measured baseline
+
+After a clean `npm ci`, all four of these must reproduce. If any of them differs,
+something in the tree moved and that is the first thing to investigate:
+
+| Command | Expected |
+|---|---|
+| `npx tsc --noEmit` | 0 errors |
+| `npx next build` | compiles, 126/126 static pages, 211 routes |
+| `npx vitest run tests/permissions` | 27 of 27 |
+| `npx vitest run` | 301 of 301, 30 of 30 files |
+
+Measured on Node v26.8.1 / npm 11.19.0.
+
+### Node version — an open discrepancy, stated plainly
+
+`package.json` pins `engines.node` to `22.x` and `.nvmrc` says `22`, because
+that is the deployment target. **The baseline above was measured on Node
+v26.8.1**, because no Node version manager is installed on the build machine and
+22.x is not available there.
+
+The gates have therefore not been verified on the version that will actually
+run in production. Close this before production GO, by either of:
+
+1. Installing a version manager (`nvm-windows`, `fnm`) and re-running the four
+   gates on Node 22.x; or
+2. Letting a Vercel preview deployment build it, which uses `engines.node` and
+   so builds on 22.x in the real target environment.
+
+Option 2 is cheaper and tests the real thing. Neither is optional.
+
+### Install scripts
+
+`npm ci` currently prints a warning that 8 dependencies have install scripts
+"not yet covered by allowScripts", among them `@prisma/client`'s postinstall.
+They do still run on npm 11.19.0 — verified by timestamp, the generated client
+is newer than the rest of the install — but npm is moving toward blocking them.
+
+This project is already safe from that change: the root `postinstall` script
+runs `prisma generate`, and `npm run build` is `prisma generate && next build`.
+Both are project lifecycle scripts, which the dependency-script gating does not
+affect. `esbuild` and `sharp` get their native binaries from optional platform
+packages rather than install scripts, so they are unaffected too.
+
+---
+
+## 11. Security position on the locked tree
+
+Locking a dependency tree means accepting what is in it, so what is in it is
+recorded here. As of 25 Oct 2026: **43 advisories — 2 critical, 9 high, 32
+moderate.**
+
+### Fixed
+
+**`next` 15.5.20 -> 15.5.28.** This was not optional. 15.5.20 was exposed to
+three *critical, unauthenticated* remote code execution advisories:
+
+| Advisory | Issue | Patched in |
+|---|---|---|
+| `GHSA-p293-qw3h-jr36` | Unauthenticated RCE on Windows-hosted servers | 15.5.24 |
+| `GHSA-2xp9-vwfh-vxw4` | Unauthenticated RCE in Image Optimization, AVIF | 15.5.24 |
+| `GHSA-2464-fhr4-w9xw` | Unauthenticated RCE in Image Optimization, SVG | 15.5.28 |
+
+Plus SSRF in rewrites via attacker-controlled destination hostname, SSRF in
+Server Actions, cache poisoning of SSG/ISR pages, and unauthenticated
+disclosure of internal Server Function endpoints. The two Image Optimization
+entries matter most for this application because it accepts user image uploads.
+
+15.5.28 is a patch-level move inside 15.5.x. All four gates were re-run on it
+and all four are unchanged. `next` is now moderate rather than critical, and
+npm raised the declared floor to `^15.5.28` so a later `npm install` cannot
+drop back below the patch.
+
+### Deliberately not fixed, with reasons
+
+**Do not run `npm audit fix`.** It was dry-run first and it is actively unsafe
+here: it attempts to resolve the `prisma` advisory by *downgrading* prisma
+6.19.3 to 6.12.0 — below the version this project's migrations and generated
+client were built against — and it still leaves all 43 advisories outstanding.
+It fixes nothing and breaks the database tooling.
+
+| Package | Severity | Why it is being left | What to do instead |
+|---|---|---|---|
+| `vitest`, `tinypool`, `vite` | 2 critical, 1 high | Dev-only; none ships in the production bundle. The vectors require the Vitest UI server or dev optimizer to be running. Fix is `vitest@5`, a major bump that risks the 301 passing tests | Upgrade on its own branch, re-run the suite, not bundled with other work |
+| `zod` | high — memory exhaustion on oversized collections | Real DoS vector, since zod validates every API input on public endpoints. But zod 3 -> 4 is a breaking migration across every schema in the app | Cheap mitigation first: request body size limits at the edge. Then schedule the zod 4 migration as its own piece of work |
+| `sharp` | high — inherited libvips CVEs | The project's own `sharp@0.33.5` is reached only through the portfolio image path, which is gated off (`PORTFOLIO_IMAGE_PROCESSING` is unset) and imported dynamically. Next bundles its own `sharp@0.34.5`, governed by the Next version just patched | **Bump before the portfolio image feature is enabled.** That flag must not be turned on while this is outstanding |
+| `@sentry/nextjs`, `rollup` | high | Fix requires `@sentry/nextjs@11`, a major bump. Sentry is not yet configured — `SENTRY_DSN` is empty — so nothing is live | Upgrade when Sentry is actually wired up, not before |
+| `prisma`, `@prisma/config` | high | The only offered "fix" is a downgrade to 6.12.0, which is worse than the advisory | Wait for a forward fix in the 6.19+ line |
+
+### The one rule
+
+Re-run `npm audit` after any dependency change, and do not enable the portfolio
+image processing flag until `sharp` is bumped.
