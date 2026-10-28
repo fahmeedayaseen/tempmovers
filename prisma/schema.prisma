@@ -44,6 +44,12 @@ enum WorkerType {
   MOVER
   BOX_TRUCK_DRIVER
   SEMI_DRIVER
+  // Junk removal — VASRUE Digital Media, 28 October 2026. Junk-only workers
+  // (Carl's junk spec §2b): a hauler brings and drives the box truck, a helper
+  // is labor only. Neither takes moving or freight work. Existing movers and
+  // box-truck drivers reach junk jobs through WorkerProfile.junkRemovalEnabled.
+  JUNK_HAULER
+  JUNK_HELPER
 }
 
 enum VehicleType {
@@ -127,6 +133,40 @@ enum JobType {
   BOX_TRUCK_ROUTE
   SEMI_ROUTE
   FREIGHT_ASSISTANCE
+  // Junk removal — VASRUE Digital Media, 28 October 2026. Priced by volume or
+  // by item as one all-in amount, never by mover-hour. See JunkRemovalDetail.
+  JUNK_REMOVAL
+}
+
+// Junk removal — VASRUE Digital Media, 28 October 2026 (Carl's junk spec §3).
+enum JunkVolumeTier {
+  SINGLE_ITEM
+  EIGHTH
+  QUARTER
+  HALF
+  THREE_QUARTER
+  FULL
+}
+
+enum JunkItemLocation {
+  CURBSIDE
+  INSIDE_GROUND
+  BASEMENT
+  UPSTAIRS
+}
+
+// VOLUME prices by truckload tier; ITEMS prices each item (the LoadUp-style
+// instant quote the spec recommends for small, known jobs).
+enum JunkPricingMode {
+  VOLUME
+  ITEMS
+}
+
+// Which seat on a junk crew an assignment fills: the hauler brings the truck,
+// helpers are labor only. Null on every non-junk assignment.
+enum JunkCrewRole {
+  HAULER
+  HELPER
 }
 
 enum JobStatus {
@@ -383,6 +423,11 @@ model WorkerProfile {
   homeLongitude                   Decimal?                 @db.Decimal(10, 7)
   homeZip                         String?
   acceptingJobs                   Boolean                  @default(false)
+  // Junk removal — VASRUE Digital Media, 28 October 2026. Capability opt-in:
+  // lets an existing mover or box-truck driver take junk jobs alongside their
+  // other work (Carl's junk spec §2a). JUNK_HAULER / JUNK_HELPER workers are
+  // junk-eligible by type and do not need this.
+  junkRemovalEnabled              Boolean                  @default(false)
   completedJobs                   Int                      @default(0)
   firstCompletedJobAt             DateTime?
   subscriptionWaivedUntilFirstJob Boolean                  @default(true)
@@ -1847,11 +1892,56 @@ model Job {
   reviews                       Review[]
   auditLogs                     AuditLog[]
   bookingAccessorials           BookingAccessorial[]
+  // Junk removal — VASRUE Digital Media, 28 October 2026. Present only on
+  // JUNK_REMOVAL jobs.
+  junkRemovalDetail             JunkRemovalDetail?
 
   @@index([status, startsAt])
   @@index([marketId, status])
   @@index([territoryId, status])
   @@index([addressId])
+}
+
+// Junk removal — VASRUE Digital Media, 28 October 2026.
+//
+// The junk-specific half of a JUNK_REMOVAL job, 1:1 with Job so the Job model
+// keeps its shape (Carl's junk spec §3). The money columns are a snapshot taken
+// at booking: junk is one all-in price with the platform's take-rate inside it,
+// so the crew's pay is fixed when the customer books, never recomputed from
+// hours worked.
+model JunkRemovalDetail {
+  id                    String           @id @default(cuid())
+  jobId                 String           @unique
+  job                   Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  pricingMode           JunkPricingMode
+  volumeTier            JunkVolumeTier?
+  // ITEMS path: [{ code, quantity }] against the market's item price list.
+  items                 Json?
+  itemCategories        String[]         @default([])
+  itemNotes             String?
+  itemLocation          JunkItemLocation
+  hasHeavyItems         Boolean          @default(false)
+  specialItems          String[]         @default([])
+  // Private storage keys only, never URLs. Customer photos at booking; crew
+  // photos before and after the haul; the dump receipt as proof of proper
+  // disposal. None of these feed any payout math (spec §5b, §7).
+  photoKeys             String[]         @default([])
+  beforePhotoKeys       String[]         @default([])
+  afterPhotoKeys        String[]         @default([])
+  dumpReceiptKey        String?
+  // Internal margin input only (spec §5b): never a customer line, never paid out.
+  estimatedDumpFeeCents Int?
+  servicePriceCents     Int
+  surchargesCents       Int              @default(0)
+  takeRatePercent       Int
+  platformTakeCents     Int
+  crewPoolCents         Int
+  helpersRequired       Int              @default(0)
+  helperSharePercent    Int
+  haulerShareCents      Int
+  helperShareCents      Int              @default(0)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 }
 
 model Assignment {
@@ -1865,6 +1955,10 @@ model Assignment {
   status              AssignmentStatus @default(INVITED)
   agreedEarningsCents Int
   platformFeeCents    Int              @default(500)
+  // Junk removal — VASRUE Digital Media, 28 October 2026. Set only on junk
+  // assignments, where agreedEarningsCents is a flat crew share for the whole
+  // job rather than an hourly rate.
+  junkCrewRole        JunkCrewRole?
   scheduledHours      Decimal          @db.Decimal(5, 2)
   actualHours         Decimal?         @db.Decimal(5, 2)
   checkInAt           DateTime?
@@ -2119,6 +2213,16 @@ model PricingRule {
   fleetIncludedVehicles               Int           @default(5)
   additionalFleetVehicleCents         Int           @default(1500)
   urgentPremiumPercent                Int           @default(20)
+  // Junk removal — VASRUE Digital Media, 28 October 2026. Junk is one all-in
+  // price with the platform's share taken out of it (DEDUCT_FROM_PROVIDER):
+  // junkTakeRatePercent of the price is TempMovers', the rest is the crew's.
+  // junkHelperSharePercent is each helper's cut of the crew's part; the hauler
+  // keeps the remainder, out of which they pay their own dump fees.
+  // junkPriceTable overrides the default tier, item and surcharge prices in
+  // lib/junk/pricing.ts (integer cents); null means the defaults apply.
+  junkTakeRatePercent                 Int           @default(30)
+  junkHelperSharePercent              Int           @default(25)
+  junkPriceTable                      Json?
   active                              Boolean       @default(true)
   updatedAt                           DateTime      @updatedAt
 }
@@ -2264,6 +2368,11 @@ model LaunchMarket {
   carrierRecruitmentEnabled Boolean     @default(false)
   dispatchSupportEnabled    Boolean     @default(false)
   freightBrokerageEnabled   Boolean     @default(false)
+  // Junk removal — VASRUE Digital Media, 28 October 2026. The per-market junk
+  // switch. Deliberately here, beside the other per-service controls, and not
+  // FeatureFlag.enabledServiceTypes: that field is advisory and gates nothing
+  // at runtime (see its own comment), so junk would be bookable everywhere.
+  junkRemovalEnabled        Boolean     @default(false)
   // Legacy staged-activation flags retained for back-compat with existing
   // route checks; the six controls above are the spec's canonical set.
   publicBookingEnabled      Boolean     @default(false)

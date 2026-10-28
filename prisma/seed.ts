@@ -51,11 +51,12 @@ async function main() {
 
   await prisma.launchMarket.upsert({
     where: { marketCode: "INDY" },
-    update: { publicBookingEnabled: true, workerRecruitingEnabled: true, freightEnabled: true },
+    // Junk removal — VASRUE Digital Media, 28 Oct 2026: junk removal launches in Indianapolis only (junk spec §2).
+    update: { publicBookingEnabled: true, workerRecruitingEnabled: true, freightEnabled: true, junkRemovalEnabled: true },
     create: {
       marketCode: "INDY", name: "Indianapolis Metro", state: "IN",
       zipCodes: ["46201","46204","46220","46032","46037","46060","46142","46168","46123","46112"],
-      publicBookingEnabled: true, workerRecruitingEnabled: true, freightEnabled: true,
+      publicBookingEnabled: true, workerRecruitingEnabled: true, freightEnabled: true, junkRemovalEnabled: true,
     },
   });
 
