@@ -67,3 +67,10 @@ export async function POST(request: Request) {
     staleLoadCount: staleLoadIds.length, staleLoadIds,
   });
 }
+
+// BLOCK-08 — VASRUE Digital Media, 27 October 2026.
+// Vercel Cron invokes scheduled routes with GET (sending the same
+// "Authorization: Bearer <CRON_SECRET>" header checked above). With POST
+// alone every scheduled run returned 405 and did nothing — confirmed on the
+// staging deployment. POST stays for manual runs and external schedulers.
+export const GET = POST;
