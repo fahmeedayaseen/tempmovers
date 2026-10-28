@@ -165,7 +165,7 @@ export async function POST(request: Request) {
 
   const customerUser = await prisma.user.findUnique({ where: { id: authed.userId }, select: { id: true, firstName: true } });
   if (customerUser) {
-    const { subject, html, text } = bookingConfirmationTemplate({ customerName: customerUser.firstName, jobId: job.id, scheduledStart: job.startsAt });
+    const { subject, html, text } = bookingConfirmationTemplate({ customerName: customerUser.firstName, jobId: job.id, scheduledStart: job.startsAt, service: "junk removal pickup" });
     await queueNotification({
       userId: customerUser.id, type: "BOOKING_CONFIRMATION", channels: ["EMAIL", "IN_APP"],
       title: subject, body: text, html, idempotencyKey: `booking-confirmed:${job.id}`,

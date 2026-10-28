@@ -1,10 +1,12 @@
 import { baseLayout, button, APP_URL } from "./base";
 
-export function bookingConfirmationTemplate({ customerName, jobId, scheduledStart }: { customerName: string; jobId: string; scheduledStart: Date }) {
+// Junk removal — VASRUE Digital Media, 28 Oct 2026: `service` names what was
+// booked ("move" by default), so a junk pickup isn't confirmed as a move.
+export function bookingConfirmationTemplate({ customerName, jobId, scheduledStart, service = "move" }: { customerName: string; jobId: string; scheduledStart: Date; service?: string }) {
   const url = `${APP_URL}/customer/jobs/${jobId}`;
   return {
     subject: "Your TempMovers booking is confirmed",
-    html: baseLayout(`<h1 style="font-size:18px;">Your booking is confirmed</h1><p>Hi ${customerName},</p><p>Your move is scheduled for <strong>${scheduledStart.toLocaleString()}</strong>.</p>${button(url, "View booking")}`),
+    html: baseLayout(`<h1 style="font-size:18px;">Your booking is confirmed</h1><p>Hi ${customerName},</p><p>Your ${service} is scheduled for <strong>${scheduledStart.toLocaleString()}</strong>.</p>${button(url, "View booking")}`),
     text: `Your TempMovers booking is confirmed for ${scheduledStart.toLocaleString()}. View it at ${url}`,
   };
 }

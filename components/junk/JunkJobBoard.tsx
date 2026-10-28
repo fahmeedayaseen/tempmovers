@@ -64,6 +64,7 @@ export default function JunkJobBoard() {
   const [capability, setCapability] = useState<Capability | null>(null);
   const [mine, setMine] = useState<MyJob[]>([]);
   const [open, setOpen] = useState<OpenJob[]>([]);
+  const [feedLoaded, setFeedLoaded] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -81,6 +82,7 @@ export default function JunkJobBoard() {
       } else {
         setOpen([]);
       }
+      setFeedLoaded(true);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Couldn't load junk jobs.");
     }
@@ -194,7 +196,8 @@ export default function JunkJobBoard() {
 
       <h4>Open junk jobs</h4>
       {!capability.canTakeJunkJobs && <p className="footerNote">Switch on junk removal jobs above to see them here.</p>}
-      {capability.canTakeJunkJobs && open.length === 0 && <p className="footerNote">No open junk jobs for your seat right now.</p>}
+      {capability.canTakeJunkJobs && !feedLoaded && <p className="footerNote">Loading open jobs…</p>}
+      {capability.canTakeJunkJobs && feedLoaded && open.length === 0 && <p className="footerNote">No open junk jobs for your seat right now.</p>}
       {open.length > 0 && (
         <table className="table">
           <thead><tr><th>Job</th><th>When</th><th>What</th><th>Your pay</th><th></th></tr></thead>

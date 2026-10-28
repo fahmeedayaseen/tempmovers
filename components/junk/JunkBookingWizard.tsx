@@ -277,15 +277,16 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
           {photoMessage && <p className="footerNote">{photoMessage}</p>}
 
           <h3>Pickup</h3>
-          <div className="grid4" style={{ gridTemplateColumns: "2fr 1fr 70px 110px" }}>
-            <div className="field"><label>Street address</label><input value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="123 Main St" /></div>
-            <div className="field"><label>City</label><input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Indianapolis" /></div>
-            <div className="field"><label>State</label><input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} /></div>
-            <div className="field"><label>ZIP</label><input value={postalCode} inputMode="numeric" maxLength={5} onChange={(e) => setPostalCode(e.target.value)} placeholder="46204" /></div>
+          {/* Wrapping rows rather than fixed grid columns, so each field keeps a usable width on a phone. */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <div className="field" style={{ flex: "2 1 220px" }}><label>Street address</label><input value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="123 Main St" /></div>
+            <div className="field" style={{ flex: "1 1 130px" }}><label>City</label><input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Indianapolis" /></div>
+            <div className="field" style={{ flex: "0 0 64px" }}><label>State</label><input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} /></div>
+            <div className="field" style={{ flex: "0 0 100px" }}><label>ZIP</label><input value={postalCode} inputMode="numeric" maxLength={5} onChange={(e) => setPostalCode(e.target.value)} placeholder="46204" /></div>
           </div>
-          <div className="grid4" style={{ gridTemplateColumns: "1fr 2fr", marginTop: 10 }}>
-            <div className="field"><label>Date &amp; time</label><input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></div>
-            <div className="field"><label>Access notes (gate code, parking, where to find the items)</label><input value={accessNotes} maxLength={1000} onChange={(e) => setAccessNotes(e.target.value)} /></div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+            <div className="field" style={{ flex: "1 1 200px" }}><label>Date &amp; time</label><input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></div>
+            <div className="field" style={{ flex: "2 1 260px" }}><label>Access notes (gate code, parking, where to find the items)</label><input value={accessNotes} maxLength={1000} onChange={(e) => setAccessNotes(e.target.value)} /></div>
           </div>
 
           {error && <p className="footerNote" style={{ color: "#b42318" }}>{error}</p>}
