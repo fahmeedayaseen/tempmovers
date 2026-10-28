@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { startCheckrScreening } from "@/lib/screening/start-checkr";
 import { getScreeningQuote } from "@/lib/screening/packages";
+// Junk removal — VASRUE Digital Media, 28 Oct 2026: junk-only worker types screen under the hauler or mover package.
+import { screeningRoleFor } from "@/lib/junk/crew";
 
 const schema = z.object({ reason: z.string().min(1, "A sponsorship reason is required.") });
 
@@ -34,7 +36,7 @@ export async function POST(request: Request, context: { params: Promise<{ charge
   if (!charge) {
     const worker = await prisma.workerProfile.findUnique({ where: { id: chargeId } });
     if (!worker) return NextResponse.json({ error: "Screening charge or worker not found." }, { status: 404 });
-    const quote = getScreeningQuote(worker.workerType);
+    const quote = getScreeningQuote(screeningRoleFor(worker.workerType));
     charge = await prisma.screeningCharge.create({
       data: {
         workerId: worker.id, packageSlug: quote.packageSlug, baseAmountCents: quote.baseAmountCents,

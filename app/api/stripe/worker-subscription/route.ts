@@ -22,6 +22,11 @@ const priceEnv: Record<string, string> = {
  *  Driver Basic (that plan doesn't cover semi equipment at all). */
 function planAllowedForWorker(workerType: string, plan: string): boolean {
   if (workerType === "MOVER") return plan === "MOVER";
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. Junk workers reuse the existing plans by
+  // role, never a junk-specific one (junk spec §7a): hauler on Driver Basic,
+  // helper on the Mover plan.
+  if (workerType === "JUNK_HAULER") return plan === "DRIVER_BASIC";
+  if (workerType === "JUNK_HELPER") return plan === "MOVER";
   if (workerType === "BOX_TRUCK_DRIVER") return ["DRIVER_BASIC", "OWNER_OPERATOR_PRO", "FLEET"].includes(plan);
   if (workerType === "SEMI_DRIVER") return ["OWNER_OPERATOR_PRO", "FLEET"].includes(plan);
   return false;
@@ -56,8 +61,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "This subscription plan is not available for your worker type." }, { status: 403 });
   }
 
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026: the first-paid-job waiver also covers
+  // the Driver Basic plan of a junk hauler (junk spec §7a). Movers and junk
+  // helpers reach it through the MOVER plan exactly as before.
+  const waiverPlan = parsed.data.plan === "MOVER" || (worker.workerType === "JUNK_HAULER" && parsed.data.plan === "DRIVER_BASIC");
   if (
-    parsed.data.plan === "MOVER" &&
+    waiverPlan &&
     worker.subscriptionWaivedUntilFirstJob &&
     isMoverSubscriptionWaived(worker.completedJobs, worker.firstCompletedJobAt)
   ) {
@@ -68,16 +77,18 @@ export async function POST(request: Request) {
     // ACTIVE) since no payment has actually happened yet.
     const updated = await prisma.workerProfile.update({
       where: { id: worker.id },
-      data: { subscriptionPlan: "MOVER", subscriptionStatus: "INCOMPLETE" },
+      data: { subscriptionPlan: parsed.data.plan, subscriptionStatus: "INCOMPLETE" },
     });
     await prisma.auditLog.create({
-      data: { actorId: authed.userId, action: "MOVER_PLAN_SELECTED_WITH_WAIVER", entityType: "WorkerProfile", entityId: worker.id, details: { plan: "MOVER" } },
+      data: { actorId: authed.userId, action: "MOVER_PLAN_SELECTED_WITH_WAIVER", entityType: "WorkerProfile", entityId: worker.id, details: { plan: parsed.data.plan } },
     });
     return NextResponse.json({
       status: "WAIVED_UNTIL_FIRST_COMPLETED_JOB",
       amountDueCents: 0,
       plan: updated.subscriptionPlan,
-      message: "The $19.95 mover subscription begins only after the first completed paid job.",
+      message: parsed.data.plan === "MOVER"
+        ? "The $19.95 mover subscription begins only after the first completed paid job."
+        : "The $29.95 Driver Basic subscription begins only after your first completed paid haul.",
     });
   }
 

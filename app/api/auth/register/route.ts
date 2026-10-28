@@ -15,7 +15,8 @@ const schema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   role: z.enum(["CUSTOMER", "MOVER", "DRIVER"]),
-  workerType: z.enum(["MOVER", "BOX_TRUCK_DRIVER", "SEMI_DRIVER"]).optional(),
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026: JUNK_HELPER (mover role) and JUNK_HAULER (driver role) are junk-only accounts.
+  workerType: z.enum(["MOVER", "BOX_TRUCK_DRIVER", "SEMI_DRIVER", "JUNK_HAULER", "JUNK_HELPER"]).optional(),
   // Required for movers/drivers — seeds their primary market and territory.
   // Not required for customers (their market is resolved from their
   // delivery address at booking time instead — see POST /api/jobs).
@@ -27,10 +28,10 @@ const schema = z.object({
 /** Rejects nonsensical role/workerType pairs server-side instead of silently
  *  defaulting — a DRIVER role account with workerType MOVER (or vice versa)
  *  would confuse every downstream equipment/plan-eligibility check. */
-function resolveWorkerType(role: "CUSTOMER" | "MOVER" | "DRIVER", requested?: "MOVER" | "BOX_TRUCK_DRIVER" | "SEMI_DRIVER") {
+function resolveWorkerType(role: "CUSTOMER" | "MOVER" | "DRIVER", requested?: "MOVER" | "BOX_TRUCK_DRIVER" | "SEMI_DRIVER" | "JUNK_HAULER" | "JUNK_HELPER") {
   if (role === "CUSTOMER") return null;
-  if (role === "MOVER") return "MOVER" as const;
-  if (requested !== "BOX_TRUCK_DRIVER" && requested !== "SEMI_DRIVER") return null;
+  if (role === "MOVER") return requested === "JUNK_HELPER" ? ("JUNK_HELPER" as const) : ("MOVER" as const);
+  if (requested !== "BOX_TRUCK_DRIVER" && requested !== "SEMI_DRIVER" && requested !== "JUNK_HAULER") return null;
   return requested;
 }
 

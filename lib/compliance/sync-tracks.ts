@@ -70,7 +70,8 @@ export async function syncWorkerComplianceTracks(client: DbClient, workerId: str
   const latestDocByType = (type: string) => worker.documents.find((d) => d.type === type);
   const latestBackgroundCheck = worker.backgroundChecks[0];
   const latestInsurancePolicy = worker.insurancePolicies[0];
-  const isDriver = worker.workerType === "BOX_TRUCK_DRIVER" || worker.workerType === "SEMI_DRIVER";
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026: a junk hauler drives a box truck, so it is tracked as one.
+  const isDriver = worker.workerType === "BOX_TRUCK_DRIVER" || worker.workerType === "SEMI_DRIVER" || worker.workerType === "JUNK_HAULER";
   const isSemi = worker.workerType === "SEMI_DRIVER";
 
   const identityStatus = fromDocumentStatus(latestDocByType("DRIVERS_LICENSE")?.status ?? worker.identityVerification);

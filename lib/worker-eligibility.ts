@@ -8,11 +8,14 @@ import type { WorkerProfile, SubscriptionPlan, WorkerType, VehicleType } from "@
  * semi drivers ARE carriers and need the full vehicle/insurance/DOT-MC
  * treatment.
  */
+// Junk removal — VASRUE Digital Media, 28 Oct 2026: a junk-only hauler brings and drives
+// the box truck, so it carries the same vehicle and insurance requirements as
+// a box-truck driver. A junk-only helper is labor only, like a mover.
 export function requiresVehicle(workerType: WorkerType): boolean {
-  return workerType === "BOX_TRUCK_DRIVER" || workerType === "SEMI_DRIVER";
+  return workerType === "BOX_TRUCK_DRIVER" || workerType === "SEMI_DRIVER" || workerType === "JUNK_HAULER";
 }
 export function requiresCommercialVehicleInsurance(workerType: WorkerType): boolean {
-  return workerType === "BOX_TRUCK_DRIVER" || workerType === "SEMI_DRIVER";
+  return workerType === "BOX_TRUCK_DRIVER" || workerType === "SEMI_DRIVER" || workerType === "JUNK_HAULER";
 }
 export function requiresDotMc(workerType: WorkerType): boolean {
   // Box-truck DOT/MC is conditional in the real world (intrastate-only

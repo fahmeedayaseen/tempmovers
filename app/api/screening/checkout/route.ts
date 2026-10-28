@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import { requireRole, AuthError } from "@/lib/auth";
 import { getScreeningQuote, ScreeningPackageNotConfiguredError } from "@/lib/screening/packages";
+// Junk removal — VASRUE Digital Media, 28 Oct 2026: junk-only worker types screen under the hauler or mover package.
+import { screeningRoleFor } from "@/lib/junk/crew";
 
 const schema = z.object({
   feeDisclosureAccepted: z.literal(true, { errorMap: () => ({ message: "You must accept the screening fee disclosure." }) }),
@@ -46,7 +48,7 @@ export async function POST(request: Request) {
 
   let quote;
   try {
-    quote = getScreeningQuote(worker.workerType);
+    quote = getScreeningQuote(screeningRoleFor(worker.workerType));
   } catch (e) {
     if (e instanceof ScreeningPackageNotConfiguredError) return NextResponse.json({ error: e.message }, { status: 500 });
     throw e;

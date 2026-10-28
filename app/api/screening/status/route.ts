@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { getScreeningQuote, ScreeningPackageNotConfiguredError } from "@/lib/screening/packages";
+// Junk removal — VASRUE Digital Media, 28 Oct 2026: junk-only worker types screen under the hauler or mover package.
+import { screeningRoleFor } from "@/lib/junk/crew";
 
 export async function GET(request: Request) {
   let authed;
@@ -20,7 +22,7 @@ export async function GET(request: Request) {
 
   let quote = null;
   try {
-    quote = getScreeningQuote(worker.workerType);
+    quote = getScreeningQuote(screeningRoleFor(worker.workerType));
   } catch (e) {
     if (!(e instanceof ScreeningPackageNotConfiguredError)) throw e;
   }
