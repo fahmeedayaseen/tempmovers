@@ -15,6 +15,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:backfill-geo": "tsx prisma/backfill-geo.ts",
     "smoke-test": "tsx scripts/smoke-test.ts",
+    "stripe:setup": "tsx scripts/stripe-setup.ts",
     "portfolio-cleanup": "tsx scripts/portfolio-cleanup.ts",
     "portfolio-process": "tsx scripts/portfolio-process.ts",
     "postinstall": "prisma generate",
