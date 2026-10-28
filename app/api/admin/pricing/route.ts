@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { requireMarketAccessByCode, ForbiddenError } from "@/lib/market-access";
+import { Prisma } from "@prisma/client";
+import { junkPriceTableOverrideSchema } from "@/lib/junk/pricing";
 
 const schema = z.object({
   marketCode: z.string().default("US-DEFAULT"),
@@ -27,6 +29,14 @@ const schema = z.object({
   // this endpoint can raise minimumMovers/minimumHours but never below 2 / 3.
   minimumMovers: z.number().int().min(2).optional(),
   minimumHours: z.number().min(3).optional(),
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. The take-rate is the platform's share
+  // of the all-in junk price; each helper's share is a cut of the crew's part,
+  // capped so the hauler always keeps the larger share. junkPriceTable
+  // overrides any tier, item or surcharge price (integer cents); null resets
+  // the market to the defaults in lib/junk/pricing.ts.
+  junkTakeRatePercent: z.number().int().min(0).max(100).optional(),
+  junkHelperSharePercent: z.number().int().min(0).max(45).optional(),
+  junkPriceTable: junkPriceTableOverrideSchema.nullable().optional(),
 });
 
 export async function GET(request: Request) {
@@ -62,7 +72,11 @@ export async function PUT(request: Request) {
 
   const parsed = schema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const { marketCode, ...updates } = parsed.data;
+  const { marketCode, junkPriceTable, ...rest } = parsed.data;
+  const updates = {
+    ...rest,
+    ...(junkPriceTable !== undefined && { junkPriceTable: junkPriceTable === null ? Prisma.DbNull : junkPriceTable }),
+  };
 
   // Market-scoped write: enforce access to THIS market's pricing (or platform
   // scope for the national default). Resolve-from-record, fail closed.
@@ -80,7 +94,7 @@ export async function PUT(request: Request) {
   });
 
   await prisma.auditLog.create({
-    data: { actorId: authed.userId, action: "PRICING_UPDATED", entityType: "PricingRule", entityId: rule.id, details: { marketCode, ...updates } },
+    data: { actorId: authed.userId, action: "PRICING_UPDATED", entityType: "PricingRule", entityId: rule.id, details: { marketCode, ...rest, ...(junkPriceTable !== undefined && { junkPriceTable }) } },
   });
 
   return NextResponse.json({ pricing: rule });
