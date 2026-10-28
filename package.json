@@ -16,6 +16,8 @@
     "prisma:backfill-geo": "tsx prisma/backfill-geo.ts",
     "smoke-test": "tsx scripts/smoke-test.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
+    "db:migrate-production": "node scripts/migrate-production.mjs",
+    "db:repoint-production": "node scripts/repoint-to-production.mjs",
     "portfolio-cleanup": "tsx scripts/portfolio-cleanup.ts",
     "portfolio-process": "tsx scripts/portfolio-process.ts",
     "postinstall": "prisma generate",
