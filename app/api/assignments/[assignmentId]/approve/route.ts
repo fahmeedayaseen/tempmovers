@@ -46,8 +46,12 @@ export async function POST(request: Request, context: { params: Promise<{ assign
   }
   if (assignment.payout) return NextResponse.json({ error: "Already approved and paid out." }, { status: 409 });
 
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. A junk seat is paid the flat share
+  // fixed at booking (agreedEarningsCents holds the whole share), never hours
+  // times a rate. Must stay in step with lib/capture-preview.ts's junk branch.
+  const isJunkSeat = assignment.junkCrewRole !== null;
   const billedHours = Math.max(MINIMUM_JOB_HOURS, Number(assignment.actualHours));
-  const grossEarningsCents = Math.round(assignment.agreedEarningsCents * billedHours);
+  const grossEarningsCents = isJunkSeat ? assignment.agreedEarningsCents : Math.round(assignment.agreedEarningsCents * billedHours);
   const isFirstCompletion = assignment.worker.completedJobs < 1 && !assignment.worker.firstCompletedJobAt;
 
   const [updatedAssignment, payout] = await prisma.$transaction([
@@ -74,7 +78,7 @@ export async function POST(request: Request, context: { params: Promise<{ assign
   ]);
 
   await prisma.auditLog.create({
-    data: { actorId: authed.userId, action: "ASSIGNMENT_APPROVED", entityType: "Assignment", entityId: assignmentId, details: { billedHours, grossEarningsCents } },
+    data: { actorId: authed.userId, action: "ASSIGNMENT_APPROVED", entityType: "Assignment", entityId: assignmentId, details: { billedHours, grossEarningsCents, junkCrewRole: assignment.junkCrewRole } },
   });
 
   // If every billable assignment on this job (CHECKED_OUT or APPROVED —

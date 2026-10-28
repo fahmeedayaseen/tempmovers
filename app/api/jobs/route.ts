@@ -7,7 +7,9 @@ import { requireRole, AuthError } from "@/lib/auth";
 import { geocodeAddress, GeocodingNotConfiguredError } from "@/lib/geocoding";
 import { queueNotification } from "@/lib/notifications";
 import { bookingConfirmationTemplate } from "@/lib/email/templates/booking";
-import { SANITIZED_JOB_SELECT } from "@/lib/access/sanitize-job";
+import { SANITIZED_JOB_FEED_SELECT } from "@/lib/access/sanitize-job";
+import { canTakeJunkJobs, isJunkOnlyWorkerType, junkCrewRoleFor, junkSeats, JUNK_SEAT_HOLDING_STATUSES } from "@/lib/junk/crew";
+import type { Prisma } from "@prisma/client";
 
 // Server-side minimums are repeated here even though the client also enforces them —
 // a client can always be bypassed, so this is the actual source of truth.
@@ -182,11 +184,42 @@ export async function GET(request: Request) {
   // GET /api/driver/loads' existing pattern (browsing allowed regardless of
   // onboarding/screening completeness, only *requesting* is gated) — see
   // lib/access/opportunity-access.ts for the equivalent policy.
+  //
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. Junk jobs reach only workers who can
+  // take them (a junk-only account, or a mover / box-truck driver who has
+  // switched junk on), and a junk-only account sees nothing else. A junk job
+  // whose seat for this worker is already filled is left out. `?service=junk`
+  // or `?service=moving` narrows the feed further.
+  const worker = await prisma.workerProfile.findUnique({ where: { userId: authed.userId }, select: { workerType: true, junkRemovalEnabled: true } });
+  const junkOk = worker ? canTakeJunkJobs(worker) : false;
+  const junkOnly = worker ? isJunkOnlyWorkerType(worker.workerType) : false;
+  const service = new URL(request.url).searchParams.get("service");
+  let typeWhere: Prisma.JobWhereInput["type"];
+  if (service === "junk" || junkOnly) typeWhere = junkOk ? "JUNK_REMOVAL" : { in: [] };
+  else if (service === "moving" || !junkOk) typeWhere = { not: "JUNK_REMOVAL" };
+
   const jobs = await prisma.job.findMany({
-    where: { status: { in: ["POSTED", "MATCHING", "PARTIALLY_FILLED"] }, postingMode: { notIn: ["INVITE_SPECIFIC_WORKERS", "PRIVATE_INVITATION_ONLY"] } },
-    select: SANITIZED_JOB_SELECT,
+    where: {
+      status: { in: ["POSTED", "MATCHING", "PARTIALLY_FILLED"] }, postingMode: { notIn: ["INVITE_SPECIFIC_WORKERS", "PRIVATE_INVITATION_ONLY"] },
+      ...(typeWhere !== undefined && { type: typeWhere }),
+    },
+    select: SANITIZED_JOB_FEED_SELECT,
     orderBy: { startsAt: "asc" },
     take: 50,
   });
-  return NextResponse.json({ jobs });
+
+  const junkIds = jobs.filter((j) => j.type === "JUNK_REMOVAL").map((j) => j.id);
+  if (junkIds.length === 0) return NextResponse.json({ jobs });
+  const held = await prisma.assignment.findMany({
+    where: { jobId: { in: junkIds }, status: { in: [...JUNK_SEAT_HOLDING_STATUSES] } },
+    select: { jobId: true, junkCrewRole: true },
+  });
+  const myRole = worker ? junkCrewRoleFor(worker.workerType) : null;
+  const withSeats = jobs.flatMap((j) => {
+    if (j.type !== "JUNK_REMOVAL" || !j.junkRemovalDetail) return [j];
+    const seats = junkSeats({ helpersRequired: j.junkRemovalDetail.helpersRequired, filledRoles: held.filter((h) => h.jobId === j.id).map((h) => h.junkCrewRole) });
+    const open = myRole === "HAULER" ? seats.haulerOpen : seats.helpersOpen > 0;
+    return open ? [{ ...j, junkSeats: seats }] : [];
+  });
+  return NextResponse.json({ jobs: withSeats });
 }

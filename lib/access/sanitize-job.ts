@@ -17,3 +17,18 @@ export const SANITIZED_JOB_SELECT = {
   customerMoverRateCents: true,
   market: { select: { name: true, state: true } },
 } as const;
+
+// Junk removal — VASRUE Digital Media, 28 Oct 2026. What a worker browsing the junk board
+// may see of a junk job before taking it: what is being hauled, how hard it is,
+// and what each seat pays. Never the customer's photos or notes, the address,
+// or the platform's take.
+export const SANITIZED_JUNK_DETAIL_SELECT = {
+  pricingMode: true, volumeTier: true, items: true, itemCategories: true, itemLocation: true,
+  hasHeavyItems: true, specialItems: true, helpersRequired: true, haulerShareCents: true, helperShareCents: true,
+} as const;
+
+/** The worker job feed: the sanitized job plus, on junk jobs only, the sanitized junk detail. */
+export const SANITIZED_JOB_FEED_SELECT = {
+  ...SANITIZED_JOB_SELECT,
+  junkRemovalDetail: { select: SANITIZED_JUNK_DETAIL_SELECT },
+} as const;

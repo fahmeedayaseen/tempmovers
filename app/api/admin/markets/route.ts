@@ -42,6 +42,8 @@ const updateSchema = z.object({
   carrierRecruitmentEnabled: z.boolean().optional(),
   dispatchSupportEnabled: z.boolean().optional(),
   freightBrokerageEnabled: z.boolean().optional(),
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026: the per-market junk switch.
+  junkRemovalEnabled: z.boolean().optional(),
   zipCodes: z.array(z.string()).optional(),
   defaultRadiusMiles: z.number().int().positive().optional(),
   override: z.boolean().optional(),

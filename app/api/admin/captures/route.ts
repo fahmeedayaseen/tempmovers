@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     prisma.job.findMany({
       where: { status: "COMPLETED", paymentStatus: "AUTHORIZED" },
       select: {
-        id: true, title: true, estimatedTotalCents: true, platformFeePerHourCents: true, urgentPremiumCents: true, bookingProtectionFeeCents: true,
+        id: true, title: true, type: true, estimatedTotalCents: true, platformFeePerHourCents: true, urgentPremiumCents: true, bookingProtectionFeeCents: true,
         customer: { select: { user: { select: { firstName: true, lastName: true } } } },
       },
       orderBy: { updatedAt: "asc" },

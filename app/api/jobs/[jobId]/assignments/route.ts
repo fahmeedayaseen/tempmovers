@@ -7,6 +7,8 @@ import { checkOpportunityAccess } from "@/lib/access/opportunity-access";
 import { queueNotification } from "@/lib/notifications";
 import { assignmentNoticeTemplate } from "@/lib/email/templates/booking";
 import { checkJobPostingModeAllowsSelfApply } from "@/lib/job-posting-mode";
+import { canTakeJunkJobs, junkCrewRoleFor, junkSeats, JUNK_SEAT_HOLDING_STATUSES } from "@/lib/junk/crew";
+import { Prisma, type Assignment } from "@prisma/client";
 
 /**
  * Lists a job's assignments — for the customer-facing "Approve Hours"
@@ -46,10 +48,17 @@ export async function GET(request: Request, context: { params: Promise<{ jobId: 
 // moversRequired is allowed (customer/admin picks), but the job can't be
 // short-crewed below the approved minimum at confirmation time — enforced
 // in the confirm/assign step, not here.
+//
+// Junk removal — VASRUE Digital Media, 28 Oct 2026. The same route takes a seat on a junk
+// crew. Junk is different in three ways: drivers are admitted (a box-truck
+// driver or junk hauler fills the hauler seat), each seat is paid the flat
+// share fixed at booking, and seats are capped — one hauler plus the helpers
+// the booking called for — so the seat check and the insert run in one
+// serializable transaction and two workers can never take the same seat.
 export async function POST(request: Request, context: { params: Promise<{ jobId: string }> }) {
   let authed;
   try {
-    authed = await requireRole(request, ["MOVER"]);
+    authed = await requireRole(request, ["MOVER", "DRIVER"]);
   } catch (e) {
     if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status });
     throw e;
@@ -64,7 +73,12 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
 
   const worker = await prisma.workerProfile.findUnique({ where: { userId: authed.userId } });
   if (!worker) return NextResponse.json({ error: "Worker profile not found." }, { status: 404 });
-  if (worker.workerType !== "MOVER") {
+  const isJunk = job.type === "JUNK_REMOVAL";
+  const junkRole = isJunk ? junkCrewRoleFor(worker.workerType) : null;
+  if (isJunk) {
+    if (!junkRole) return NextResponse.json({ error: "This account type can't take junk removal jobs." }, { status: 403 });
+    if (!canTakeJunkJobs(worker)) return NextResponse.json({ error: "Switch on junk removal jobs in your dashboard before taking one." }, { status: 403 });
+  } else if (worker.workerType !== "MOVER") {
     return NextResponse.json({ error: "Only mover accounts can accept moving jobs." }, { status: 403 });
   }
 
@@ -110,21 +124,56 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
     return NextResponse.json({ error: "This job is outside your active market or service area." }, { status: 403 });
   }
 
-  const assignment = await prisma.assignment.upsert({
-    where: { jobId_workerId: { jobId, workerId: worker.id } },
-    update: {},
-    create: {
-      jobId, workerId: worker.id, status: "ACCEPTED",
-      agreedEarningsCents: job.customerMoverRateCents,
-      scheduledHours: job.estimatedHours,
-    },
-  });
+  let assignment: Assignment;
+  if (isJunk && junkRole) {
+    const detail = await prisma.junkRemovalDetail.findUnique({ where: { jobId } });
+    if (!detail) return NextResponse.json({ error: "This junk removal job is missing its details. Contact support." }, { status: 409 });
+    const share = junkRole === "HAULER" ? detail.haulerShareCents : detail.helperShareCents;
+    let outcome: { assignment: Assignment } | { full: true };
+    try {
+      outcome = await prisma.$transaction(async (tx) => {
+        const existing = await tx.assignment.findUnique({ where: { jobId_workerId: { jobId, workerId: worker.id } } });
+        if (existing && (JUNK_SEAT_HOLDING_STATUSES as readonly string[]).includes(existing.status)) return { assignment: existing };
+        const held = await tx.assignment.findMany({ where: { jobId, status: { in: [...JUNK_SEAT_HOLDING_STATUSES] } }, select: { junkCrewRole: true } });
+        const seats = junkSeats({ helpersRequired: detail.helpersRequired, filledRoles: held.map((h) => h.junkCrewRole) });
+        if (junkRole === "HAULER" ? !seats.haulerOpen : seats.helpersOpen === 0) return { full: true as const };
+        const seatData = { status: "ACCEPTED" as const, junkCrewRole: junkRole, agreedEarningsCents: share, platformFeeCents: 0, scheduledHours: job.estimatedHours };
+        const taken = await tx.assignment.upsert({
+          where: { jobId_workerId: { jobId, workerId: worker.id } },
+          update: { ...seatData, respondedAt: new Date() },
+          create: { jobId, workerId: worker.id, ...seatData },
+        });
+        const after = junkSeats({ helpersRequired: detail.helpersRequired, filledRoles: [...held.map((h) => h.junkCrewRole), junkRole] });
+        await tx.job.update({ where: { id: jobId }, data: { status: after.full ? "CONFIRMED" : "PARTIALLY_FILLED" } });
+        return { assignment: taken };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") {
+        return NextResponse.json({ error: "Someone took a seat on this job at the same moment. Refresh and try again." }, { status: 409 });
+      }
+      throw e;
+    }
+    if ("full" in outcome) {
+      return NextResponse.json({ error: junkRole === "HAULER" ? "This job already has its hauler." : "This job's helper seats are already filled." }, { status: 409 });
+    }
+    assignment = outcome.assignment;
+  } else {
+    assignment = await prisma.assignment.upsert({
+      where: { jobId_workerId: { jobId, workerId: worker.id } },
+      update: {},
+      create: {
+        jobId, workerId: worker.id, status: "ACCEPTED",
+        agreedEarningsCents: job.customerMoverRateCents,
+        scheduledHours: job.estimatedHours,
+      },
+    });
 
-  const acceptedCount = await prisma.assignment.count({ where: { jobId, status: { in: ["ACCEPTED", "CHECKED_IN", "CHECKED_OUT", "APPROVED"] } } });
-  await prisma.job.update({
-    where: { id: jobId },
-    data: { status: acceptedCount >= job.moversRequired ? "CONFIRMED" : "PARTIALLY_FILLED" },
-  });
+    const acceptedCount = await prisma.assignment.count({ where: { jobId, status: { in: ["ACCEPTED", "CHECKED_IN", "CHECKED_OUT", "APPROVED"] } } });
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { status: acceptedCount >= job.moversRequired ? "CONFIRMED" : "PARTIALLY_FILLED" },
+    });
+  }
 
   const address = await prisma.address.findUnique({ where: { id: job.addressId }, select: { city: true } });
   const notice = assignmentNoticeTemplate({

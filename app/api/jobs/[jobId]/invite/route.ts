@@ -47,6 +47,12 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
   if (!["POSTED", "MATCHING", "PARTIALLY_FILLED"].includes(job.status)) {
     return NextResponse.json({ error: "Job is not accepting workers." }, { status: 409 });
   }
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. A junk crew is paid a flat share per
+  // seat, fixed at booking; an invitation would carry the hourly mover rate.
+  // Junk jobs fill from the open junk board only.
+  if (job.type === "JUNK_REMOVAL") {
+    return NextResponse.json({ error: "Junk removal jobs are filled from the open junk job board, not by invitation." }, { status: 409 });
+  }
 
   const worker = await prisma.workerProfile.findUnique({ where: { id: parsed.data.workerId } });
   if (!worker) return NextResponse.json({ error: "Worker not found." }, { status: 404 });

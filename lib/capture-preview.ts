@@ -23,6 +23,8 @@ type Client = Prisma.TransactionClient | typeof prisma;
  */
 type JobForCapture = {
   id: string;
+  type: string;
+  estimatedTotalCents: number;
   platformFeePerHourCents: number;
   urgentPremiumCents: number;
   bookingProtectionFeeCents: number;
@@ -45,6 +47,27 @@ export async function calculateJobFinalCaptureAmount(
   }
   if (billableAssignments.some((a) => a.status !== "APPROVED" || !a.customerApprovedAt || a.actualHours == null)) {
     return { ok: false, reason: "All worker hours must be customer-approved before capture." };
+  }
+
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. Junk is one all-in price fixed at
+  // booking, so the customer is charged exactly what they were quoted. The
+  // crew's flat shares (paid at approval from the same booking snapshot) are
+  // the labor; the platform's part is what the price leaves after them,
+  // including any helper seat that was never filled. A junk job with no hauler
+  // check-out was never actually hauled, so it is not capturable.
+  if (job.type === "JUNK_REMOVAL") {
+    if (!billableAssignments.some((a) => a.junkCrewRole === "HAULER")) {
+      return { ok: false, reason: "A junk removal job needs its hauler's approved check-out before capture." };
+    }
+    const junkLaborCents = billableAssignments.reduce((sum, a) => sum + a.agreedEarningsCents, 0);
+    const junkTotalCents = job.estimatedTotalCents;
+    return {
+      ok: true,
+      finalLaborCents: junkLaborCents,
+      finalPlatformFeeCents: junkTotalCents - job.bookingProtectionFeeCents - job.urgentPremiumCents - junkLaborCents,
+      finalTotalCents: junkTotalCents,
+      billableAssignments,
+    };
   }
 
   const finalLaborCents = billableAssignments.reduce((sum, a) => {

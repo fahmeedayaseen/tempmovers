@@ -18,6 +18,7 @@ export const REVENUE_CATEGORIES = [
   "MOVING_PLATFORM_FEE",
   "BOX_TRUCK_PLATFORM_FEE",
   "SEMI_PLATFORM_FEE",
+  "JUNK_REMOVAL_TAKE",         // Junk removal — VASRUE Digital Media, 28 Oct 2026: the take-rate inside a junk price.
   "BOOKING_PROTECTION_FEE",
   "ACCESSORIAL_PLATFORM_SHARE",
   "DETENTION_PLATFORM_SHARE",
