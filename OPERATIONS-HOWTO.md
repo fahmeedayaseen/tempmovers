@@ -1,6 +1,6 @@
 # TempMovers — Operations How-To
 
-Written by VASRUE Digital Media, 24 October 2026, as part of the consolidation checkpoint.
+Written by VASRUE Digital Media, 24 October 2026, as part of the consolidation checkpoint. **Updated 28 October 2026** — sections 1, 2, 5, 7, 8, 9 and 10 now reflect the current state.
 Every command below has been run against this project. Nothing here is theoretical.
 
 ---
@@ -12,19 +12,19 @@ The database now exists. It never did before this checkpoint — the artifact sh
 | | |
 |---|---|
 | Database | Neon, project `frosty-feather-79812865` |
-| Branches | `production` (default, empty) · `migration-test` (migrated + seeded) |
-| Migration | `prisma/migrations/20261024121500_init` — 97 tables, 85 enums, 135 foreign keys |
-| App host | Vercel team `tempmovers-team` (Pro). **No project created yet** |
+| Branches | `production` (default — migrated and seeded 27 Oct) · `staging` (a copy of `production`, used for testing) · `migration-test` (the checkpoint branch; expires 31 Oct) · `pre-restore-damaged` (kept from the restore test in section 6) |
+| Migrations | Three, all additive: `20261024121500_init` (97 tables, 85 enums, 135 foreign keys), then two that add the columns the application code already used |
+| App host | Vercel team `tempmovers-team`. `tempmovers.com` serves the holding page. A password-protected test deployment runs against the `staging` branch |
 | Documents | Cloudflare R2 — **not provisioned yet** |
 
-**Production is NO-GO**, and not because of the database. See section 7.
+The typecheck, the production build, the full test suite and N1–N11 all pass — see sections 5 and 10. What stands between this and a live platform is now the third-party accounts in section 7, not the code or the database.
 
 ---
 
 ## 2. One-time setup on a new machine
 
 ```bash
-npm install                 # needs the lockfile fix already in this repo
+npm ci                      # never npm install — see section 10
 npx prisma generate
 ```
 
@@ -98,13 +98,15 @@ select * from _prisma_migrations;                            -- finished_at set,
 ## 5. Running the tests
 
 ```bash
-npx vitest run                                          # all 30 files
+npx vitest run                                          # all 31 files
 npx vitest run tests/permissions/negative.test.ts       # N1–N11 security suite
 ```
 
 Both need `DATABASE_URL` **and** `AUTH_SECRET` in the environment. `lib/auth.ts` refuses to start without a 32-character secret, and the failure looks unrelated to auth if you haven't seen it before.
 
-Current results: **267 business-logic tests pass. N1–N11 is 23 of 27** — every test in the launch-safe domains passes; all four failures are in dormant freight brokerage. See section 7.
+> **Never run the suite against `production`.** The permission tests create real users. Point `DATABASE_URL` at `staging` or a throwaway branch for every test run.
+
+Current results, 28 Oct 2026: **310 of 310 tests pass, 31 of 31 files. N1–N11 is 27 of 27.** At the checkpoint on 24 Oct it was 23 of 27, with all four failures in dormant freight brokerage; those four were application-code defects and have since been fixed.
 
 ---
 
@@ -134,29 +136,28 @@ Before any production migration: take a branch of production first. It is instan
 
 ---
 
-## 7. Known blockers
+## 7. Blockers — status
 
-Production GO is blocked by application-code defects, not by database work.
+The four blockers this section listed on 24 Oct are closed:
 
-| | Issue | Impact |
+| | Issue on 24 Oct | Now |
 |---|---|---|
-| **BLOCK-03** | `prisma/seed.ts` creates none of the eight brokerage flags the checkpoint requires evidence for. It creates five unrelated ones | Behaviour is safe — the gate fails closed, so a missing flag reads as OFF. The *evidence* cannot be produced. `DISPATCH_SERVICES_ENABLED` is caught in the same gap, so dispatch support comes up off |
-| **BLOCK-05** | 34 TypeScript errors. 17 are code querying fields that don't exist, or exist on the other load model | `tsc --noEmit` fails. At least one route — `app/api/shipper/loads/[loadId]` — throws on every request |
-| **BLOCK-06** | 17 files still use the Next 14 synchronous `params`. Next 15 requires a `Promise` | **`next build` fails.** 68 of 81 route handlers were already migrated; the 13 that weren't, plus all 4 pages, are the newer portals |
-| **BLOCK-08** | All three cron routes export `POST` only. Vercel Cron invokes with `GET` | Scheduled jobs return 405 and silently do nothing. `vercel.json` is in place but inert until the routes accept GET |
+| **BLOCK-03** | `prisma/seed.ts` created none of the eight brokerage flags | All eight are seeded, all **off**. Read back from a copy of `production`: 8 of 8 present, 0 enabled |
+| **BLOCK-05** | 34 TypeScript errors | **0** |
+| **BLOCK-06** | 17 files on the Next 14 synchronous `params`; `next build` failed | All 81 dynamic route handlers and all four pages on the Next 15 form; **build green** |
+| **BLOCK-08** | Cron routes exported `POST` only; Vercel Cron calls with `GET` | All three accept `GET`. Each returns 401 without `CRON_SECRET` and 200 with it |
 
 Styling was fixed pragmatically: Tailwind is installed with **preflight disabled**, so the portals render without disturbing the original design system. Two styling systems now coexist — full normalisation remains a separate piece of work.
+
+**What is still needed before production, all of it accounts only the owner can open:** Stripe Connect (Express) and Stripe business verification · Checkr · Certificial · a Cloudflare R2 bucket · Resend, Twilio, Google Maps (two keys), Sentry and an FMCSA web key · a GitHub repository connected to Vercel. Also resolve the `directUrl` note in section 2 before production traffic.
 
 ---
 
 ## 8. When broker authority arrives
 
-Freight brokerage is dormant pending DOT authority, MC number and the BMC-84 bond. Before switching any flag on:
+Freight brokerage is dormant pending DOT authority, MC number and the BMC-84 bond.
 
-1. Fix BLOCK-03 so the eight flags exist and their state is recorded.
-2. Settle the load-model question: `proofOfDeliveryUrl` exists on `CarrierRoute`, not `FreightLoad`, and the shipper endpoint queries the wrong one. Decide whether the endpoint should read `CarrierRoute`, whether `FreightLoad` needs its own field, or whether shippers shouldn't see it.
-3. Fix the uncaught `BrokerageNotAuthorizedError` in `app/api/freight/loads/route.ts` PATCH so a blocked write returns 403 rather than escaping as a 500. The gate itself works correctly.
-4. Re-run N1–N11 and expect 27 of 27.
+The code-side prerequisites this section listed on 24 Oct are complete: the eight flags exist and are recorded as off; `FreightLoad` now carries its own `proofOfDeliveryUrl`; a blocked brokerage write returns 403 instead of 500; and N1–N11 is 27 of 27. What remains is regulatory.
 
 Turning flags on is a management action. The code never flips them on its own, by design.
 
@@ -165,12 +166,12 @@ Turning flags on is a management action. The code never flips them on its own, b
 ## 9. Quick reference
 
 ```bash
-npm install && npx prisma generate      # setup
+npm ci && npx prisma generate           # setup
 npx prisma migrate deploy               # apply migrations
 npx tsx prisma/seed.ts                  # seed
-npx vitest run                          # tests (needs DATABASE_URL + AUTH_SECRET)
-npx tsc --noEmit                        # typecheck (currently 34 errors)
-npm run build                           # production build (currently fails, BLOCK-06)
+npx vitest run                          # tests (needs DATABASE_URL + AUTH_SECRET; never production)
+npx tsc --noEmit                        # typecheck (0 errors)
+npm run build                           # production build (green)
 neon branches list --project-id frosty-feather-79812865
 ```
 
@@ -212,9 +213,9 @@ something in the tree moved and that is the first thing to investigate:
 | `npx tsc --noEmit` | 0 errors |
 | `npx next build` | compiles, 126/126 static pages, 211 routes |
 | `npx vitest run tests/permissions` | 27 of 27 |
-| `npx vitest run` | 301 of 301, 30 of 30 files |
+| `npx vitest run` | 310 of 310, 31 of 31 files |
 
-Measured on Node v26.8.1 / npm 11.19.0.
+Measured on Node v26.8.1 / npm 11.19.0. The suite figure was 301 of 301 across 30 files on 25 Oct; nine tests were added on 28 Oct.
 
 ### Node version — resolved, and not the way it was expected to resolve
 
@@ -316,7 +317,7 @@ It fixes nothing and breaks the database tooling.
 
 | Package | Severity | Why it is being left | What to do instead |
 |---|---|---|---|
-| `vitest`, `tinypool`, `vite` | 2 critical, 1 high | Dev-only; none ships in the production bundle. The vectors require the Vitest UI server or dev optimizer to be running. Fix is `vitest@5`, a major bump that risks the 301 passing tests | Upgrade on its own branch, re-run the suite, not bundled with other work |
+| `vitest`, `tinypool`, `vite` | 2 critical, 1 high | Dev-only; none ships in the production bundle. The vectors require the Vitest UI server or dev optimizer to be running. Fix is `vitest@5`, a major bump that risks the 310 passing tests | Upgrade on its own branch, re-run the suite, not bundled with other work |
 | `zod` | high — memory exhaustion on oversized collections | Real DoS vector, since zod validates every API input on public endpoints. But zod 3 -> 4 is a breaking migration across every schema in the app | Cheap mitigation first: request body size limits at the edge. Then schedule the zod 4 migration as its own piece of work |
 | `sharp` | high — inherited libvips CVEs | The project's own `sharp@0.33.5` is reached only through the portfolio image path, which is gated off (`PORTFOLIO_IMAGE_PROCESSING` is unset) and imported dynamically. Next bundles its own `sharp@0.34.5`, governed by the Next version just patched | **Bump before the portfolio image feature is enabled.** That flag must not be turned on while this is outstanding |
 | `@sentry/nextjs`, `rollup` | high | Fix requires `@sentry/nextjs@11`, a major bump. Sentry is not yet configured — `SENTRY_DSN` is empty — so nothing is live | Upgrade when Sentry is actually wired up, not before |
