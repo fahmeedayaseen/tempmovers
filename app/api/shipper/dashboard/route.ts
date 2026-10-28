@@ -14,9 +14,17 @@ export async function GET(request: Request) {
   try { authed = await requireRole(request, SHIPPER_ROLES as unknown as ("ADMIN")[]); }
   catch (e) { if (e instanceof AuthError) return NextResponse.json({ error: e.message }, { status: e.status }); throw e; }
 
+  // BLOCK-13 — VASRUE Digital Media, 27 October 2026.
+  //
+  // This filter excluded "CANCELED", which is not a CustomerInvoiceStatus. The
+  // enum's closed states are PAID, VOID and WRITTEN_OFF. Postgres rejects an
+  // unknown enum value for the whole query, so every request to this endpoint
+  // returned 500 — found by the first smoke test of the deployed app against a
+  // real database. An `as never` cast had silenced the type checker; with it
+  // removed, an invalid status here is a compile error instead of a runtime one.
   const [byStatus, openInvoices] = await Promise.all([
     prisma.freightLoad.groupBy({ by: ["status"], where: { shipperUserId: authed.userId }, _count: { _all: true } }),
-    prisma.customerInvoice.count({ where: { load: { shipperUserId: authed.userId }, status: { notIn: ["PAID", "VOID", "CANCELED"] as never } } }),
+    prisma.customerInvoice.count({ where: { load: { shipperUserId: authed.userId }, status: { notIn: ["PAID", "VOID", "WRITTEN_OFF"] } } }),
   ]);
 
   // Collapse internal statuses into shipper-friendly buckets.
