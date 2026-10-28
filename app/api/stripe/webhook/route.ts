@@ -466,6 +466,24 @@ async function processStripeEvent(event: Stripe.Event) {
         where: { stripePaymentIntentId: pi.id },
         data: { paymentStatus: "AUTHORIZED" },
       }),
+      // BLOCK-14 — VASRUE Digital Media, 27 October 2026.
+      //
+      // Nothing anywhere moved a Job out of DRAFT, its schema default. Movers
+      // can only see (GET /api/jobs), self-apply to (POST .../assignments) or
+      // be invited to (POST .../invite) a job that is POSTED, MATCHING or
+      // PARTIALLY_FILLED, so every customer booking stopped at DRAFT and could
+      // never be staffed. Found by driving a real test booking end to end on
+      // staging.
+      //
+      // Authorised funds are the gate, per the comment above: a job reaches
+      // the marketplace only once Stripe confirms the money is held, never
+      // at creation, so no mover can take an unfunded job. The DRAFT guard
+      // makes this one-way — a job that has already progressed is never
+      // rewound by a re-delivered or out-of-order event.
+      prisma.job.updateMany({
+        where: { stripePaymentIntentId: pi.id, status: "DRAFT" },
+        data: { status: "POSTED" },
+      }),
       prisma.carrierRoute.updateMany({
         where: { stripePaymentIntentId: pi.id },
         data: { paymentStatus: "AUTHORIZED" },
