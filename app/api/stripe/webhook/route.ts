@@ -81,13 +81,23 @@ async function createPaymentTransactionAndSendReceipt(paymentIntentId: string) {
   if (existing) return; // already processed this charge — a redelivered webhook event
 
   const cardDetails = charge.payment_method_details?.card;
+  // BLOCK-16 — VASRUE Digital Media, 27 October 2026.
+  //
+  // This stored charge.amount, which on a manual-capture charge is the amount
+  // AUTHORISED, not the amount collected. Moving jobs authorise the estimate
+  // and capture the final approved hours (capture-payment route), so the two
+  // usually differ. Found on staging: a $231.95 authorisation captured at
+  // $120.95 produced a transaction — and so a customer receipt — for $231.95,
+  // and a refund route offering $231.95 of refundable balance. amount_captured
+  // is what Stripe actually took. For automatic-capture charges (freight
+  // loads) the two values are equal, so nothing changes there.
   const transaction = await prisma.paymentTransaction.create({
     data: {
       jobId: job?.id ?? null,
       loadId: load?.id ?? null,
       stripePaymentIntentId: paymentIntentId,
       stripeChargeId: charge.id,
-      amountReceivedCents: charge.amount,
+      amountReceivedCents: charge.amount_captured,
       currency: charge.currency,
       paymentMethodBrand: cardDetails?.brand ?? null,
       paymentMethodLast4: cardDetails?.last4 ?? null,
