@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { claimNextPaymentAttempt, markAttemptCreated, markAttemptFailed } from "@/lib/payment-attempts";
 import { ensureStripeCustomer } from "@/lib/ensure-stripe-customer";
+import { findReusableIntent } from "@/lib/stripe-intent-reuse";
 
 /**
  * Server-authoritative: the PaymentIntent amount is built entirely from
@@ -43,6 +44,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not your job." }, { status: 403 });
   }
   if (job.stripePaymentIntentId && job.paymentStatus !== "FAILED" && job.paymentStatus !== "CANCELED") {
+    // BLOCK-19 — VASRUE Digital Media, 28 Oct 2026: a first attempt that never
+    // reached the bank leaves the intent waiting for a card; hand it back so
+    // the customer can finish paying. See lib/stripe-intent-reuse.ts.
+    const reusable = await findReusableIntent(job.stripePaymentIntentId, job.estimatedTotalCents);
+    if (reusable) {
+      return NextResponse.json({ clientSecret: reusable.client_secret, paymentIntentId: reusable.id, totalCents: job.estimatedTotalCents, attemptNumber: null, reused: true });
+    }
     return NextResponse.json({ error: "Existing authorization must be updated or cancelled first." }, { status: 409 });
   }
   const stripeCustomerId = await ensureStripeCustomer(prisma, job.customerId);

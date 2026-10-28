@@ -6,6 +6,7 @@ import { requireRole, AuthError } from "@/lib/auth";
 import { claimNextPaymentAttempt, markAttemptCreated, markAttemptFailed } from "@/lib/payment-attempts";
 import { ensureStripeCustomer } from "@/lib/ensure-stripe-customer";
 import { accessorialSumsForLoad } from "@/lib/accessorials/sums";
+import { findReusableIntent } from "@/lib/stripe-intent-reuse";
 
 /**
  * Server-authoritative: the PaymentIntent amount is built entirely from
@@ -36,7 +37,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "You did not post this load." }, { status: 403 });
   }
 
+  // Step 6: include APPROVED accessorial customer charges in what the customer
+  // authorizes. providerShare/platformShare of these are realized on the
+  // settlement side (accessorialSumsForLoad), so the money reconciles.
+  // (Computed ahead of the guard below so a retry can be checked against it.)
+  const accessorials = await accessorialSumsForLoad(load.id);
+  const totalCents = load.grossCarrierCents + load.platformFeeCents + (load.accessorialsCents || 0) + accessorials.customerChargeCents;
+
   if (load.stripePaymentIntentId && load.paymentStatus !== "FAILED" && load.paymentStatus !== "CANCELED") {
+    // BLOCK-19 — VASRUE Digital Media, 28 Oct 2026: reuse an intent Stripe is
+    // still waiting on, for the current total. See lib/stripe-intent-reuse.ts.
+    const reusable = await findReusableIntent(load.stripePaymentIntentId, totalCents);
+    if (reusable) {
+      return NextResponse.json({ clientSecret: reusable.client_secret, paymentIntentId: reusable.id, totalCents, attemptNumber: null, reused: true });
+    }
     return NextResponse.json({ error: "Existing authorization must be updated or cancelled first." }, { status: 409 });
   }
 
@@ -46,12 +60,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No customer profile on file for the load poster." }, { status: 409 });
   }
   const stripeCustomerId = await ensureStripeCustomer(prisma, customerProfile.id);
-
-  // Step 6: include APPROVED accessorial customer charges in what the customer
-  // authorizes. providerShare/platformShare of these are realized on the
-  // settlement side (accessorialSumsForLoad), so the money reconciles.
-  const accessorials = await accessorialSumsForLoad(load.id);
-  const totalCents = load.grossCarrierCents + load.platformFeeCents + (load.accessorialsCents || 0) + accessorials.customerChargeCents;
 
   const attempt = await claimNextPaymentAttempt({ loadId: load.id }, "load-payment-intent");
 
