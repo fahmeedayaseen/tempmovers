@@ -26,6 +26,7 @@ const SERVICE_CONTROLS = [
   { key: "carrierRecruitmentEnabled", label: "Carrier recruitment" },
   { key: "dispatchSupportEnabled", label: "Dispatch support" },
   { key: "freightBrokerageEnabled", label: "Freight brokerage" },
+  { key: "junkRemovalEnabled", label: "Junk removal" }, // Junk removal — VASRUE Digital Media, 28 Oct 2026.
 ] as const;
 
 type Market = {
@@ -39,6 +40,7 @@ type Market = {
   carrierRecruitmentEnabled: boolean;
   dispatchSupportEnabled: boolean;
   freightBrokerageEnabled: boolean;
+  junkRemovalEnabled: boolean;
 };
 
 const STAGE_STYLES: Record<Stage, string> = {

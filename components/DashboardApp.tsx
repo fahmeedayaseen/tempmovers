@@ -7,6 +7,8 @@ import LoadBoard from "./LoadBoard";
 import StripePaymentForm from "./StripePaymentForm";
 import TipForm from "./TipForm";
 import WorkerProfileCard, { type WorkerCardData } from "./WorkerProfileCard";
+// Junk removal — VASRUE Digital Media, 28 Oct 2026: the worker-side junk board.
+import JunkJobBoard from "./junk/JunkJobBoard";
 
 type View = "marketplace" | "customer" | "partner" | "mover" | "driver" | "launch" | "admin";
 
@@ -2078,6 +2080,8 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
 
         {view === "customer" && (
           <>
+            {/* Junk removal — VASRUE Digital Media, 28 Oct 2026: junk has its own booking flow at /book/junk. */}
+            <div className="banner"><strong>Junk removal:</strong> furniture, appliances and full cleanouts at one all-in price, disposal included. <a href="/book/junk">Book junk removal</a></div>
             <div className="banner"><strong>Booking guardrail:</strong> moving projects require at least two movers and a three-hour minimum. Scheduled work uses a $5 per man-hour platform fee; urgent work defaults to $7 per man-hour. Each booking also includes $9.95 booking protection.</div>
             <div className="grid4">
               <article className="metric"><span>Upcoming jobs</span><strong>2</strong><small>Next: Tuesday at 10:00 AM</small></article>
@@ -2279,6 +2283,9 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
             <div className="dashboardGrid" style={{marginTop:20}}>
               {renderPayoutHistoryPanel()}
             </div>
+            <div style={{marginTop:20}}>
+              <JunkJobBoard />
+            </div>
             <div className="dashboardGrid" style={{marginTop:20}}>
               <section className="panel">
                 <div className="panelHead"><div><p className="eyebrow">CHOOSE YOUR HELPER — PHASE 3</p><h3>Job invitations</h3></div></div>
@@ -2325,6 +2332,9 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
               <article className="metric"><span>Active vehicle</span><strong>26-ft box</strong><small>Liftgate · 10,000-lb payload</small></article>
               <article className="metric"><span>Open routes</span><strong>7</strong><small>Within preferred territory</small></article>
               <article className="metric"><span>Weekly gross</span><strong>$2,220</strong><small>Before operating expenses</small></article>
+            </div>
+            <div style={{marginTop:20}}>
+              <JunkJobBoard />
             </div>
             <div className="dashboardGrid">
               <LoadBoard authToken={getAuthToken() ?? undefined} />

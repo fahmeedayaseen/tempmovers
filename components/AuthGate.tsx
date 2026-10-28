@@ -21,7 +21,10 @@ function AuthForms({
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [role, setRole] = useState<"CUSTOMER" | "MOVER" | "DRIVER">(initialRole);
-  const [workerType, setWorkerType] = useState<"MOVER" | "BOX_TRUCK_DRIVER" | "SEMI_DRIVER">("BOX_TRUCK_DRIVER");
+  const [workerType, setWorkerType] = useState<"BOX_TRUCK_DRIVER" | "SEMI_DRIVER" | "JUNK_HAULER">("BOX_TRUCK_DRIVER");
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026: a mover account can be
+  // junk-only (JUNK_HELPER). Driver accounts pick JUNK_HAULER from the vehicle list.
+  const [moverKind, setMoverKind] = useState<"MOVER" | "JUNK_HELPER">("MOVER");
   const [homeZip, setHomeZip] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
@@ -38,7 +41,7 @@ function AuthForms({
           ? { email, password }
           : {
               email, password, firstName, lastName, role,
-              ...(role !== "CUSTOMER" ? { workerType, homeZip } : {}),
+              ...(role !== "CUSTOMER" ? { workerType: role === "MOVER" ? moverKind : workerType, homeZip } : {}),
               acceptedTerms, marketingConsent,
             };
 
@@ -99,6 +102,16 @@ function AuthForms({
                 <select value={workerType} onChange={(e) => setWorkerType(e.target.value as typeof workerType)}>
                   <option value="BOX_TRUCK_DRIVER">Box truck</option>
                   <option value="SEMI_DRIVER">Semi tractor-trailer</option>
+                  <option value="JUNK_HAULER">Box truck — junk removal only</option>
+                </select>
+              </div>
+            )}
+            {role === "MOVER" && (
+              <div className="field">
+                <label>Work you want</label>
+                <select value={moverKind} onChange={(e) => setMoverKind(e.target.value as typeof moverKind)}>
+                  <option value="MOVER">Moving jobs (junk removal optional)</option>
+                  <option value="JUNK_HELPER">Junk removal only</option>
                 </select>
               </div>
             )}
@@ -149,16 +162,26 @@ function AuthForms({
  * authed fetch elsewhere in the app (subscriptions, admin stats, etc.)
  * depends on this actually having run first.
  */
-export default function AuthGate({ children }: { children: (user: StoredUser, service?: AuthIntent["service"]) => React.ReactNode }) {
+export default function AuthGate({
+  children, signedOutView = "marketing", signedOutIntent,
+}: {
+  children: (user: StoredUser, service?: AuthIntent["service"]) => React.ReactNode;
+  // Junk removal — VASRUE Digital Media, 28 Oct 2026. A deep link such as
+  // /book/junk sends a signed-out visitor straight to the sign-in / create
+  // account forms (signedOutView "auth") instead of the marketing homepage,
+  // then renders its own page once they are in. Default behaviour unchanged.
+  signedOutView?: "marketing" | "auth";
+  signedOutIntent?: AuthIntent;
+}) {
   const [status, setStatus] = useState<"checking" | "marketing" | "auth" | "authed">("checking");
-  const [authIntent, setAuthIntent] = useState<AuthIntent>({ mode: "login" });
+  const [authIntent, setAuthIntent] = useState<AuthIntent>(signedOutIntent ?? { mode: "login" });
   const [user, setUser] = useState<StoredUser | null>(null);
 
   useEffect(() => {
     const token = getAuthToken();
     const stored = getStoredUser();
     if (!token || !stored) {
-      setStatus("marketing");
+      setStatus(signedOutView === "auth" ? "auth" : "marketing");
       return;
     }
     // Validate the stored token is still good rather than trusting it forever.
@@ -177,7 +200,8 @@ export default function AuthGate({ children }: { children: (user: StoredUser, se
   function handleSignOut() {
     logout().finally(() => {
       setUser(null);
-      setStatus("marketing");
+      if (signedOutView === "auth") window.location.assign("/");
+      else setStatus("marketing");
     });
   }
 
@@ -201,7 +225,7 @@ export default function AuthGate({ children }: { children: (user: StoredUser, se
       <AuthForms
         initialMode={authIntent.mode}
         initialRole={authIntent.role}
-        onBack={() => setStatus("marketing")}
+        onBack={() => (signedOutView === "auth" ? window.location.assign("/") : setStatus("marketing"))}
         onAuthed={(u, nextStep) => {
           setUser(u);
           setStatus("authed");

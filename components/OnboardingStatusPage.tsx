@@ -383,7 +383,7 @@ function PaymentsSection() {
 
 /** Subscription plan selection — redirects to real Stripe Checkout. */
 function SubscriptionSection({ workerType }: { workerType?: string }) {
-  const [plan, setPlan] = useState<"DRIVER_BASIC" | "OWNER_OPERATOR_PRO" | "FLEET" | "MOVER">(workerType === "SEMI_DRIVER" ? "OWNER_OPERATOR_PRO" : workerType === "BOX_TRUCK_DRIVER" ? "DRIVER_BASIC" : "MOVER");
+  const [plan, setPlan] = useState<"DRIVER_BASIC" | "OWNER_OPERATOR_PRO" | "FLEET" | "MOVER">(workerType === "SEMI_DRIVER" ? "OWNER_OPERATOR_PRO" : workerType === "BOX_TRUCK_DRIVER" || workerType === "JUNK_HAULER" ? "DRIVER_BASIC" : "MOVER");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -409,8 +409,9 @@ function SubscriptionSection({ workerType }: { workerType?: string }) {
     <div>
       <label style={labelStyle()}>Plan</label>
       <select style={fieldStyle()} value={plan} onChange={(e) => setPlan(e.target.value as typeof plan)}>
-        {workerType === "MOVER" && <option value="MOVER">Mover — $19.95/mo</option>}
-        {workerType === "BOX_TRUCK_DRIVER" && <option value="DRIVER_BASIC">Driver Basic — $29.95/mo</option>}
+        {/* Junk removal — VASRUE Digital Media, 28 Oct 2026: junk helpers use the Mover plan, junk haulers Driver Basic. */}
+        {(workerType === "MOVER" || workerType === "JUNK_HELPER") && <option value="MOVER">Mover — $19.95/mo</option>}
+        {(workerType === "BOX_TRUCK_DRIVER" || workerType === "JUNK_HAULER") && <option value="DRIVER_BASIC">Driver Basic — $29.95/mo</option>}
         {(workerType === "BOX_TRUCK_DRIVER" || workerType === "SEMI_DRIVER") && <option value="OWNER_OPERATOR_PRO">Owner-Operator Pro — $59.95/mo</option>}
         {(workerType === "BOX_TRUCK_DRIVER" || workerType === "SEMI_DRIVER") && <option value="FLEET">Fleet — $149/mo (up to 5 vehicles)</option>}
       </select>

@@ -36,7 +36,7 @@ const SERVICES = [
   { icon: ICONS.users, tone: "blue", title: "Moving Labor", copy: "Vetted movers for residential and office loading, unloading, and full moves.", href: "#" },
   { icon: ICONS.truck, tone: "violet", title: "Box Truck Delivery", copy: "Furniture, appliances, and freight delivered with a driver and truck in one flat rate.", href: "#" },
   { icon: ICONS.route, tone: "teal", title: "Freight Shipping", copy: "LTL and FTL freight, pallets, and equipment moved by approved carriers.", href: "#" },
-  { icon: ICONS.boxes, tone: "orange", title: "Junk Removal", copy: "Cleanouts, hauling, and responsible disposal, booked the same way as a move.", href: "#" },
+  { icon: ICONS.boxes, tone: "orange", title: "Junk Removal", copy: "Cleanouts, hauling, and responsible disposal, booked the same way as a move.", href: "/book/junk" }, // Junk removal — VASRUE Digital Media, 28 Oct 2026: live route.
   { icon: ICONS.cart, tone: "violet", title: "Store Pickup & Delivery", copy: "Home Depot, Lowe's, Costco, and other big-box runs handled end to end.", href: "#" },
   { icon: ICONS.building, tone: "blue", title: "Business Solutions", copy: "Recurring jobs, consolidated invoicing, and a dedicated account contact.", href: "#" },
 ];
@@ -254,7 +254,7 @@ export default function MarketingHomepage({ onGetStarted }: { onGetStarted: (int
             </div>
             <p>Movers, box trucks, and freight carriers — one platform for Indianapolis and the surrounding area.</p>
           </div>
-          <div className="tm-footerCol"><h4>Services</h4><a href="#">Moving Labor</a><a href="#">Box Truck Delivery</a><a href="#">Freight Shipping</a><a href="#">Junk Removal</a></div>
+          <div className="tm-footerCol"><h4>Services</h4><a href="#">Moving Labor</a><a href="#">Box Truck Delivery</a><a href="#">Freight Shipping</a><a href="/book/junk">Junk Removal</a></div>
           <div className="tm-footerCol"><h4>For Businesses</h4><a href="#">Business Solutions</a><a href="#">Recurring Jobs</a><a href="#">Invoicing</a></div>
           <div className="tm-footerCol"><h4>Become a Worker</h4><a href="#">Become a Mover</a><a href="#">Drive With TempMovers</a><a href="#">Screening &amp; Pay</a></div>
           <div className="tm-footerCol"><h4>Help Center</h4><a href="#">Pricing</a><a href="#">Contact Support</a><a href="#">Trust &amp; Safety</a></div>
