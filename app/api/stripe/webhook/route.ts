@@ -454,6 +454,33 @@ async function processStripeEvent(event: Stripe.Event) {
       where: { stripePaymentIntentId: pi.id },
       data: { paymentStatus: "CANCELED" },
     });
+    // BLOCK-17 — VASRUE Digital Media, 27 October 2026.
+    //
+    // The reverse of BLOCK-14. Authorised funds are what move a job from
+    // DRAFT to POSTED; when that authorisation is canceled the job stayed
+    // POSTED, so movers could still find and accept a job with no money held
+    // behind it. Confirmed on staging: three canceled bookings remained
+    // POSTED/CANCELED in the marketplace.
+    //
+    // Only a job nobody has accepted yet (still POSTED) goes back to DRAFT;
+    // authorising again re-posts it through the BLOCK-14 path. A job that
+    // already has crew is left alone and flagged, because silently
+    // un-staffing committed workers would be worse than an admin decision.
+    // The match is on the job's CURRENT PaymentIntent, so a late cancel for
+    // a superseded authorisation can never touch a re-authorised job.
+    await prisma.job.updateMany({
+      where: { stripePaymentIntentId: pi.id, status: { in: ["POSTED", "MATCHING"] } },
+      data: { status: "DRAFT" },
+    });
+    const staffed = await prisma.job.findMany({
+      where: { stripePaymentIntentId: pi.id, status: { in: ["PARTIALLY_FILLED", "CONFIRMED", "IN_PROGRESS"] } },
+      select: { id: true },
+    });
+    if (staffed.length > 0) {
+      captureIntegrationAlert("Payment authorisation canceled on a job that already has crew assigned.", {
+        area: "payment", paymentIntentId: pi.id, jobIds: staffed.map((j) => j.id).join(","),
+      });
+    }
     await prisma.carrierRoute.updateMany({
       where: { stripePaymentIntentId: pi.id },
       data: { paymentStatus: "CANCELED" },
