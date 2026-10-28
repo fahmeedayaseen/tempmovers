@@ -1,6 +1,6 @@
 # TempMovers — Operations How-To
 
-Written by VASRUE Digital Media, 24 October 2026, as part of the consolidation checkpoint. **Updated 28 October 2026** — sections 1, 2, 5, 7, 8, 9 and 10 now reflect the current state.
+Written by VASRUE Digital Media, 24 October 2026, as part of the consolidation checkpoint. **Updated 28 October 2026** — sections 1, 2, 5, 7, 8, 9 and 10 now reflect the current state, and section 12 covers junk removal, added the same day.
 Every command below has been run against this project. Nothing here is theoretical.
 
 ---
@@ -13,7 +13,7 @@ The database now exists. It never did before this checkpoint — the artifact sh
 |---|---|
 | Database | Neon, project `frosty-feather-79812865` |
 | Branches | `production` (default — migrated and seeded 27 Oct) · `staging` (a copy of `production`, used for testing) · `migration-test` (the checkpoint branch; expires 31 Oct) · `pre-restore-damaged` (kept from the restore test in section 6) |
-| Migrations | Three, all additive: `20261024121500_init` (97 tables, 85 enums, 135 foreign keys), then two that add the columns the application code already used |
+| Migrations | Four, all additive: `20261024121500_init` (97 tables, 85 enums, 135 foreign keys), two that add the columns the application code already used, and `20261028180000_add_junk_removal` (section 12). The fourth is applied to `staging`; apply it to `production` with `npx prisma migrate deploy` when the app is deployed there |
 | App host | Vercel team `tempmovers-team`. `tempmovers.com` serves the holding page. A password-protected test deployment runs against the `staging` branch |
 | Documents | Cloudflare R2 — **not provisioned yet** |
 
@@ -85,7 +85,7 @@ Verify it landed — do not trust the CLI summary alone. `migrate deploy` can re
 
 ```sql
 select count(*) from information_schema.tables
-  where table_schema='public' and table_type='BASE TABLE';   -- expect 98 (97 + _prisma_migrations)
+  where table_schema='public' and table_type='BASE TABLE';   -- expect 99 with all four migrations (98 + _prisma_migrations)
 select count(*) from pg_type t join pg_namespace n on n.oid=t.typnamespace
   where n.nspname='public' and t.typtype='e';                -- expect 85
 select * from _prisma_migrations;                            -- finished_at set, rolled_back_at null
@@ -98,7 +98,7 @@ select * from _prisma_migrations;                            -- finished_at set,
 ## 5. Running the tests
 
 ```bash
-npx vitest run                                          # all 31 files
+npx vitest run                                          # all 33 files
 npx vitest run tests/permissions/negative.test.ts       # N1–N11 security suite
 ```
 
@@ -106,7 +106,7 @@ Both need `DATABASE_URL` **and** `AUTH_SECRET` in the environment. `lib/auth.ts`
 
 > **Never run the suite against `production`.** The permission tests create real users. Point `DATABASE_URL` at `staging` or a throwaway branch for every test run.
 
-Current results, 28 Oct 2026: **310 of 310 tests pass, 31 of 31 files. N1–N11 is 27 of 27.** At the checkpoint on 24 Oct it was 23 of 27, with all four failures in dormant freight brokerage; those four were application-code defects and have since been fixed.
+Current results, 28 Oct 2026: **332 of 332 tests pass, 33 of 33 files** (310 before junk removal, plus 22 for it in `tests/junk/`). **N1–N11 is 27 of 27.** At the checkpoint on 24 Oct it was 23 of 27, with all four failures in dormant freight brokerage; those four were application-code defects and have since been fixed.
 
 ---
 
@@ -146,6 +146,8 @@ The four blockers this section listed on 24 Oct are closed:
 | **BLOCK-05** | 34 TypeScript errors | **0** |
 | **BLOCK-06** | 17 files on the Next 14 synchronous `params`; `next build` failed | All 81 dynamic route handlers and all four pages on the Next 15 form; **build green** |
 | **BLOCK-08** | Cron routes exported `POST` only; Vercel Cron calls with `GET` | All three accept `GET`. Each returns 401 without `CRON_SECRET` and 200 with it |
+
+**BLOCK-19, closed 28 Oct:** a customer whose first card attempt never reached the bank (a mistyped expiry, a decline) could never retry — the payment routes refused any second request for a booking that already had a PaymentIntent. An intent Stripe is still waiting on is now handed back; once money is held the refusal stands. Applies to moving, junk and freight bookings.
 
 Styling was fixed pragmatically: Tailwind is installed with **preflight disabled**, so the portals render without disturbing the original design system. Two styling systems now coexist — full normalisation remains a separate piece of work.
 
@@ -213,7 +215,7 @@ something in the tree moved and that is the first thing to investigate:
 | `npx tsc --noEmit` | 0 errors |
 | `npx next build` | compiles, 126/126 static pages, 211 routes |
 | `npx vitest run tests/permissions` | 27 of 27 |
-| `npx vitest run` | 310 of 310, 31 of 31 files |
+| `npx vitest run` | 332 of 332, 33 of 33 files |
 
 Measured on Node v26.8.1 / npm 11.19.0. The suite figure was 301 of 301 across 30 files on 25 Oct; nine tests were added on 28 Oct.
 
@@ -327,3 +329,41 @@ It fixes nothing and breaks the database tooling.
 
 Re-run `npm audit` after any dependency change, and do not enable the portfolio
 image processing flag until `sharp` is bumped.
+
+---
+
+## 12. Junk removal
+
+Added 28 October 2026 from the junk-removal build spec (11-page revision), on its own branch, `feature/junk-removal`, then re-validated: typecheck, production build, the full suite, and a complete junk booking on the staging deployment.
+
+**How it runs**
+
+- The customer books at `/book/junk` — linked from the homepage Junk Removal card and footer — in three steps: what's going, crew and price, review and pay. Pricing is by truckload tier or by item, with a minimum. The quote is one all-in price with disposal included; the $9.95 booking protection is the only amount added on top.
+- The card is authorised at booking. Like every booking, the job reaches workers only once Stripe confirms the money is held.
+- The crew is a hauler, who brings the truck, plus up to two helpers, sized from the load and how hard it is to reach. Each seat pays a flat amount fixed at booking: the platform keeps its take-rate out of the price (30% by default); each helper gets a share of the crew's part (25% each by default); the hauler keeps the rest and covers their own dump fees from it.
+- Junk jobs reach junk-only accounts (sign-up options "Box truck — junk removal only" and "Junk removal only"), and movers and box-truck drivers who switch on **Take junk removal jobs** in their dashboard. Their dashboard has a junk board: open jobs with what their seat pays, then their own jobs with the address, check in and out, before and after photos, and the dump receipt.
+- The customer approves the crew as with any job; payouts are the flat shares; capture charges exactly the quoted total.
+
+**Switching it on for a market**
+
+Admin → Markets → **Junk removal** (`LaunchMarket.junkRemovalEnabled`). Indianapolis is on in the seed. A market must also be taking customer bookings. This is the switch that actually gates booking; `FeatureFlag.enabledServiceTypes` is advisory and gates nothing.
+
+**Setting prices**
+
+Through the admin pricing engine, per market, falling back to `US-DEFAULT` and then to the defaults in `lib/junk/pricing.ts` (the spec's proposed Indianapolis prices):
+
+```bash
+PUT /api/admin/pricing
+{ "marketCode": "INDY", "junkTakeRatePercent": 30, "junkHelperSharePercent": 25,
+  "junkPriceTable": { "tiersCents": { "QUARTER": 15900 }, "surchargesCents": { "FREON_APPLIANCE": 2500 } } }
+```
+
+Anything left out keeps its default; `"junkPriceTable": null` resets a market to the defaults. All amounts are integer cents. Special-item surcharges default to $0 until they are set.
+
+**Photos and receipts**
+
+They use the same private storage as worker documents. Until the storage bucket is configured, the upload buttons say so plainly and everything else works.
+
+**Open decisions for the owner**
+
+Confirm the Indianapolis prices; set the special-item surcharges; confirm the helper share and the crew-size rule (one hauler alone for a small curbside pickup, a helper for anything inside, heavy or larger, two helpers for a large load that is also heavy or upstairs or in a basement).
