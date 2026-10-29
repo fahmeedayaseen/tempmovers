@@ -350,3 +350,18 @@ export async function blockUnlessFunded(ref: FundingRef, ctx: { action: string; 
     throw e;
   }
 }
+
+/**
+ * The customer charge a worker transfer can be tied to (separate charges and
+ * transfers): the funding payment with the most money left on it, used only
+ * when it can cover the transfer. Otherwise the transfer draws on the
+ * platform's available balance as before.
+ */
+export async function sourceChargeFor(ref: FundingRef, amountCents: number, client: Client = defaultClient): Promise<string | null> {
+  const attempts = await client.fundingAttempt.findMany({
+    where: { entityType: ref.type, entityId: ref.id, stripeChargeId: { not: null }, state: { in: ["COLLECTED", "PARTIALLY_REFUNDED"] } },
+    select: { stripeChargeId: true, collectedCents: true, refundedCents: true },
+  });
+  const best = attempts.map((a) => ({ id: a.stripeChargeId, net: a.collectedCents - a.refundedCents })).sort((a, b) => b.net - a.net)[0];
+  return best && best.net >= amountCents ? best.id : null;
+}
