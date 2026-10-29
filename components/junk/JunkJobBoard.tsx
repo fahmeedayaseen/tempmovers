@@ -189,7 +189,7 @@ export default function JunkJobBoard() {
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadProof(a, kind, f); e.target.value = ""; }} />
                       </label>
                     ))}
-                    {a.seat === "HAULER" && <DisposalEntry assignmentId={a.assignmentId} onSaved={(m) => { setMessage(m); void load(); }} />}
+                    {a.seat === "HAULER" && ["CHECKED_IN", "CHECKED_OUT"].includes(a.status) && <DisposalEntry assignmentId={a.assignmentId} onSaved={(m) => { setMessage(m); void load(); }} />}
                     {a.seat === "HAULER" && (
                       <label className="btn btnSecondary" style={{ cursor: "pointer" }}>
                         {a.detail.proof.dumpReceipt ? "Dump receipt ✓" : "Dump receipt"}
