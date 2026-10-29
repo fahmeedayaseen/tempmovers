@@ -3520,3 +3520,276 @@ model ShipperQuoteRequest {
 
   @@index([shipperUserId, status])
 }
+
+// ============================================================================
+// Pay before dispatch — VASRUE Digital Media, 29 October 2026.
+// Carl's pay-before-dispatch work order and the platform payment structure
+// spec (§2–§8). Additive only: new enums and new tables. No existing model,
+// enum, column or migration is changed. New rows point at jobs, loads and
+// workers by id; the existing records stay exactly as they were.
+// ============================================================================
+
+enum FundingEntityType {
+  JOB
+  LOAD
+  FREIGHT_LOAD
+}
+
+// Payment states (spec §8). An authorisation is not on this list on purpose:
+// it is not collected money and never satisfies the funding gate.
+enum FundingState {
+  UNPAID
+  ACTION_REQUIRED
+  PROCESSING
+  COLLECTED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+  RETURNED
+  DISPUTED
+  CANCELED
+}
+
+enum FundingPurpose {
+  INITIAL
+  CHANGE_ORDER
+}
+
+enum ChangeOrderKind {
+  EXTRA_HOURS
+  EXTRA_HELPER
+  EXTRA_ITEMS
+  DISPOSAL_OVERAGE
+  OTHER
+}
+
+enum ChangeOrderStatus {
+  PROPOSED
+  ACCEPTED
+  PAID
+  DECLINED
+  CANCELED
+}
+
+enum AllocationRecipient {
+  PLATFORM
+  PROTECTION
+  HAULER
+  HELPER
+  WORKER
+  CARRIER
+  DISPOSAL
+  CUSTOMER_REFUND
+}
+
+enum AllocationState {
+  ESTIMATED
+  EARNED_PENDING_REVIEW
+  APPROVED_AWAITING_FUNDS
+  RELEASED
+  TRANSFERRED
+  HELD
+  RETAINED
+  REFUNDED
+  EXCEPTION
+}
+
+enum DisposalState {
+  ESTIMATED
+  RECEIPT_SUBMITTED
+  APPROVED
+  HELD
+  REJECTED
+}
+
+enum SettlementState {
+  SETTLED
+  EXCEPTION
+}
+
+enum PaymentExceptionKind {
+  CREDIT_TERMS
+  EVIDENCE_WAIVER
+  RECEIPT_WAIVER
+}
+
+// Immutable, versioned quote (spec §3, §8). Prices are snapshotted here on
+// acceptance; admin price edits only affect later quotes.
+model QuoteVersion {
+  id               String            @id @default(cuid())
+  entityType       FundingEntityType
+  entityId         String
+  version          Int
+  policyVersion    String
+  currency         String            @default("usd")
+  totalCents       Int
+  lines            Json
+  plan             Json?
+  createdByUserId  String?
+  acceptedAt       DateTime?
+  acceptedByUserId String?
+  createdAt        DateTime          @default(now())
+
+  @@unique([entityType, entityId, version])
+  @@index([entityType, entityId])
+}
+
+// One row per PaymentIntent that funds a job or load: the initial collection
+// and any change order. Kept in step with Stripe by the webhook and by a
+// fresh read before every dispatch decision.
+model FundingAttempt {
+  id                    String            @id @default(cuid())
+  entityType            FundingEntityType
+  entityId              String
+  purpose               FundingPurpose    @default(INITIAL)
+  quoteVersionId        String?
+  changeOrderId         String?           @unique
+  stripePaymentIntentId String            @unique
+  stripeChargeId        String?
+  paymentMethodType     String?
+  currency              String            @default("usd")
+  amountCents           Int
+  collectedCents        Int               @default(0)
+  refundedCents         Int               @default(0)
+  disputedCents         Int               @default(0)
+  state                 FundingState      @default(UNPAID)
+  failureReason         String?
+  collectedAt           DateTime?
+  fundsAvailableAt      DateTime?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([entityType, entityId])
+}
+
+// Versioned change order with the customer's consent (spec §3, §6). Added
+// work is collected before it is done.
+model ChangeOrder {
+  id               String            @id @default(cuid())
+  entityType       FundingEntityType
+  entityId         String
+  version          Int
+  kind             ChangeOrderKind
+  status           ChangeOrderStatus @default(PROPOSED)
+  deltaCents       Int
+  lines            Json
+  plan             Json?
+  reason           String
+  proposedByUserId String
+  consentText      String?
+  acceptedAt       DateTime?
+  acceptedByUserId String?
+  declinedAt       DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([entityType, entityId, version])
+  @@index([entityType, entityId, status])
+}
+
+// The final reconciliation of a job or load (spec §7, §8). One per job; the
+// unique key is what stops a second settlement.
+model PaymentSettlement {
+  id               String            @id @default(cuid())
+  entityType       FundingEntityType
+  entityId         String
+  state            SettlementState
+  policyVersion    String
+  collectedCents   Int
+  finalTotalCents  Int
+  refundCents      Int               @default(0)
+  platformFeeCents Int               @default(0)
+  feeBasisCents    Int               @default(0)
+  feeBps           Int?
+  exceptionReason  String?
+  details          Json?
+  settledByUserId  String
+  settledAt        DateTime          @default(now())
+
+  @@unique([entityType, entityId])
+}
+
+// Job-level allocation ledger (spec §5, §8). Every collected cent lands on
+// exactly one row: platform, protection, each worker, disposal, or refund.
+model PaymentAllocation {
+  id                     String              @id @default(cuid())
+  settlementId           String
+  entityType             FundingEntityType
+  entityId               String
+  recipient              AllocationRecipient
+  workerId               String?
+  assignmentId           String?
+  payoutId               String?
+  amountCents            Int
+  basis                  Json?
+  state                  AllocationState
+  stripeTransferId       String?             @unique
+  transferIdempotencyKey String?             @unique
+  transferredAt          DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  @@index([settlementId])
+  @@index([entityType, entityId])
+  @@index([assignmentId])
+}
+
+// Junk disposal: the set-aside collected up front, the actual amount on the
+// dump receipt, and its review (spec §6; junk spec §5a, §7).
+model DisposalExpense {
+  id                 String        @id @default(cuid())
+  jobId              String        @unique
+  estimatedCents     Int
+  actualCents        Int?
+  receiptKey         String?
+  receiptFingerprint String?       @unique
+  payeeWorkerId      String?
+  state              DisposalState @default(ESTIMATED)
+  submittedAt        DateTime?
+  reviewedByUserId   String?
+  reviewedAt         DateTime?
+  reviewNote         String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+// Audited owner exceptions (spec §3, §7): credit terms that let an unfunded
+// job dispatch, or a waiver of missing evidence. Never implied; always
+// written down with who and why.
+model PaymentException {
+  id                 String               @id @default(cuid())
+  entityType         FundingEntityType
+  entityId           String
+  kind               PaymentExceptionKind
+  reason             String
+  authorizedByUserId String
+  createdAt          DateTime             @default(now())
+  revokedAt          DateTime?
+  revokedByUserId    String?
+
+  @@index([entityType, entityId, kind])
+}
+
+// Admin-configurable payment settings per market (spec §9). Every value is a
+// proposal until Carl approves it; carlApprovedAt records when he did.
+model PaymentPolicyConfig {
+  id                       String    @id @default(cuid())
+  marketCode               String    @unique
+  junkPlatformFeeBps       Int       @default(3000)
+  helperHourlyCents        Int       @default(3000)
+  helperMinimumMinutes     Int       @default(120)
+  helperIncrementMinutes   Int       @default(15)
+  haulerFloorCents         Int       @default(4000)
+  truckAllowanceCents      Int       @default(1000)
+  disposalEstimatesCents   Json?
+  disposalAddersCents      Json?
+  disposalAutoApproveCents Int       @default(20000)
+  reviewWindowHours        Int       @default(24)
+  achEnabled               Boolean   @default(false)
+  carlApprovedAt           DateTime?
+  updatedByUserId          String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+}

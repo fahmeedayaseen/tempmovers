@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { onlyPodAcceptedLoads } from "@/lib/payments/settlement";
 import { partitionByMarketAccess } from "@/lib/market-access";
 import { verifyPreviewToken, computeBatchFingerprint } from "@/lib/settlements/preview-token";
 
@@ -116,7 +117,7 @@ export async function POST(request: Request) {
   // transaction rather than trusting IDs collected beforehand.
   try {
     const settlement = await prisma.$transaction(async (tx) => {
-      const allEligibleLoads = await tx.carrierRoute.findMany({
+      const capturedLoads = await tx.carrierRoute.findMany({
         where: {
           assignedWorkerId: worker.id,
           paymentStatus: "CAPTURED",
@@ -125,6 +126,9 @@ export async function POST(request: Request) {
         },
         include: { originMarket: { select: { id: true, state: true, name: true } } },
       });
+      // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: a prepaid load is
+      // captured at posting, so it qualifies only once its POD has been accepted.
+      const allEligibleLoads = await onlyPodAcceptedLoads(tx, capturedLoads);
       if (allEligibleLoads.length === 0) throw new Error("NO_ELIGIBLE_LOADS");
 
       // Option 1 partial settlement: include only loads whose origin market

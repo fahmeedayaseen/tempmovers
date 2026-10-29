@@ -9,10 +9,13 @@ import { isKeyUnder, JUNK_PROOF_KINDS, junkProofPrefix, MAX_JUNK_PHOTOS_PER_SET 
  * Junk removal — VASRUE Digital Media, 28 October 2026.
  *
  * Records the crew's proof on a junk job (Carl's junk spec §7): before and
- * after photos, and the dump receipt as proof of proper disposal. Proof is
- * for compliance and disputes only. It is never tied to pay: disposal is
- * inside the all-in price and the hauler covers their own dump (§5b), so a
- * receipt changes no amount anywhere.
+ * after photos, and the dump receipt as proof of proper disposal.
+ *
+ * 29 Oct 2026, pay before dispatch: proof is now tied to pay. Before and after
+ * photos are required evidence before a junk job settles, and the dump
+ * receipt is what the hauler's disposal reimbursement is paid against (and
+ * what any unused disposal refund to the customer is worked out from). The
+ * amount itself is entered through POST .../disposal.
  *
  * The key must have been issued by POST /api/junk/uploads/presign for this
  * job and this kind, and the object must actually exist in the bucket.

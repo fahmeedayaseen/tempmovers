@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 import { assertFreightAllowed, FreightGateError } from "@/lib/freight/gate";
 import { canTransitionLoad, computeLoadFinancials, type LoadStatus } from "@/lib/freight/load-lifecycle";
 
@@ -71,6 +72,8 @@ export async function POST(request: Request) {
   return NextResponse.json({ load }, { status: 201 });
 }
 
+// Pay before dispatch — VASRUE Digital Media, 29 Oct 2026.
+const FREIGHT_DISPATCH_STATUSES = new Set(["ACCEPTED", "DISPATCHED", "AT_PICKUP", "LOADED", "IN_TRANSIT"]);
 const transitionSchema = z.object({ loadId: z.string().min(1), toStatus: z.string().min(1), reason: z.string().max(1000).optional() });
 
 export async function PATCH(request: Request) {
@@ -96,6 +99,10 @@ export async function PATCH(request: Request) {
 
   const from = load.status as LoadStatus;
   const to = parsed.data.toStatus as LoadStatus;
+  if (FREIGHT_DISPATCH_STATUSES.has(to)) {
+    const unfunded = await blockUnlessFunded({ type: "FREIGHT_LOAD", id: load.id }, { action: "dispatched", actorUserId: authed.userId });
+    if (unfunded) return unfunded;
+  }
   if (!canTransitionLoad(from, to)) {
     return NextResponse.json({ error: `Illegal load status transition: ${from} -> ${to}.` }, { status: 409 });
   }

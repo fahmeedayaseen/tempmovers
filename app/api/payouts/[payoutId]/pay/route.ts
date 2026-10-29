@@ -6,6 +6,8 @@ import { reserveBonusRecoveryForPayout, releaseBonusRecoveryReservation } from "
 import { captureIntegrationAlert } from "@/lib/monitoring";
 import { queueNotification } from "@/lib/notifications";
 import { payoutStatusTemplate } from "@/lib/email/templates/payments";
+import { isPayBeforeDispatchJob } from "@/lib/payments/settlement";
+import { evaluateFunding } from "@/lib/payments/funding";
 
 /**
  * Pays out a worker via a real Stripe Transfer to their connected Express
@@ -126,6 +128,23 @@ export async function POST(request: Request, context: { params: Promise<{ payout
     return NextResponse.json({ error: `Worker account is ${payout.worker.operationalStatus.toLowerCase()} — payout blocked pending review.` }, { status: 409 });
   }
 
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026 (payment spec §7).
+  // On a prepaid job a payout releases only when the job is settled, its
+  // allocation is not held, and no dispute or return touches the funding.
+  const payoutJob = await prisma.assignment.findUnique({ where: { id: payout.assignmentId }, select: { jobId: true } });
+  let sourceChargeId: string | null = null;
+  let allocationId: string | null = null;
+  if (payoutJob && (await isPayBeforeDispatchJob(payoutJob.jobId))) {
+    const allocation = await prisma.paymentAllocation.findFirst({ where: { assignmentId: payout.assignmentId, recipient: { in: ["HAULER", "HELPER", "WORKER"] } } });
+    if (!allocation) return NextResponse.json({ error: "This job has not been settled yet. Payouts are released once the job is settled." }, { status: 409 });
+    if (allocation.state === "HELD") return NextResponse.json({ error: "This payout is held while a dispute or review on the job is resolved." }, { status: 409 });
+    const funding = await evaluateFunding({ type: "JOB", id: payoutJob.jobId }, { refresh: true });
+    if (funding.disputedCents > 0) return NextResponse.json({ error: "A payment on this job is disputed or was returned. The payout is held." }, { status: 409 });
+    const initial = await prisma.fundingAttempt.findFirst({ where: { entityType: "JOB", entityId: payoutJob.jobId, purpose: "INITIAL", stripeChargeId: { not: null } }, orderBy: { createdAt: "asc" } });
+    sourceChargeId = initial?.stripeChargeId ?? null;
+    allocationId = allocation.id;
+  }
+
   const isRetry = payout.status === "FAILED";
   // Stable idempotency key regardless of retry — this is what lets Stripe
   // itself refuse to create a second transfer even if this retry logic has
@@ -196,6 +215,9 @@ export async function POST(request: Request, context: { params: Promise<{ payout
         amount: reservation.netPayoutCents,
         currency: "usd",
         destination: payout.worker.stripeAccountId,
+        // Ties the transfer to the customer charge that funded it, so earned pay
+        // can move as soon as the job settles (separate charges and transfers).
+        ...(sourceChargeId && { source_transaction: sourceChargeId }),
         metadata: { payoutId: payout.id, workerId: payout.workerId, assignmentId: payout.assignmentId },
       },
       { idempotencyKey },
@@ -238,6 +260,7 @@ export async function POST(request: Request, context: { params: Promise<{ payout
       data: { stripeTransferId: transfer.id, idempotencyKey, status: "TRANSFERRED", paidAt: new Date() },
     }),
   ]);
+  if (allocationId) await prisma.paymentAllocation.update({ where: { id: allocationId }, data: { state: "TRANSFERRED", stripeTransferId: transfer.id, transferredAt: new Date() } });
 
   await prisma.auditLog.create({
     data: { actorId: authed.userId, action: "PAYOUT_TRANSFERRED", entityType: "Payout", entityId: payout.id, details: { stripeTransferId: transfer.id, netPayoutCents: reservation.netPayoutCents, recoveryCents: reservation.recoveryCents, wasRetry: isRetry } },

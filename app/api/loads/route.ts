@@ -62,9 +62,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ loads: [], comingSoon: true });
   }
 
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: the board shows
+  // only loads that are paid (or carry an audited credit-terms exception), so
+  // a driver never sees a load they could not claim. The claim route itself
+  // re-checks the funding gate on the server either way.
+  const creditTerms = await prisma.paymentException.findMany({ where: { entityType: "LOAD", kind: "CREDIT_TERMS", revokedAt: null }, select: { entityId: true } });
   const where: Record<string, unknown> = {
     visibility: "PUBLIC_PREVIEW",
     status: { in: ["OPEN", "OFFER_RECEIVED"] },
+    OR: [{ paymentStatus: { in: ["CAPTURED", "PARTIALLY_REFUNDED"] } }, { id: { in: creditTerms.map((c) => c.entityId) } }],
   };
   if (q.equipment && q.equipment !== "all") where.equipmentType = q.equipment;
   if (q.originZip) where.originZip = q.originZip;

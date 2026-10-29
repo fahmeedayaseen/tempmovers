@@ -7,6 +7,7 @@ import { captureIntegrationAlert } from "@/lib/monitoring";
 import { queueNotification } from "@/lib/notifications";
 import { reviewRequestTemplate } from "@/lib/email/templates/documents";
 import { calculateJobFinalCaptureAmount } from "@/lib/capture-preview";
+import { isPayBeforeDispatchJob, settleJob, SettlementError } from "@/lib/payments/settlement";
 
 /**
  * Captures a job's already-authorized PaymentIntent — but for the FINAL
@@ -39,6 +40,19 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
 
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return NextResponse.json({ error: "Job not found." }, { status: 404 });
+
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: the money on a
+  // prepaid job was collected at booking, so there is nothing to capture. The
+  // same admin action settles it instead (lib/payments/settlement.ts).
+  if (await isPayBeforeDispatchJob(job.id)) {
+    try {
+      const outcome = await settleJob(job.id, authed.userId);
+      return NextResponse.json({ settled: true, ...outcome });
+    } catch (e) {
+      if (e instanceof SettlementError) return NextResponse.json({ error: e.message }, { status: e.status });
+      throw e;
+    }
+  }
   if (job.status !== "COMPLETED") {
     return NextResponse.json({ error: "The job must be completed and approved before payment capture." }, { status: 409 });
   }

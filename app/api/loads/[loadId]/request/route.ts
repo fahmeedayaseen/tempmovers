@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 import { evaluateWorkerEligibility } from "@/lib/worker-eligibility";
 import { checkOpportunityAccess } from "@/lib/access/opportunity-access";
 import { claimFreightLoad } from "@/lib/freight-claim";
@@ -20,6 +21,9 @@ export async function POST(request: Request, context: { params: Promise<{ loadId
   if (load.status !== "OPEN" && load.status !== "OFFER_RECEIVED") {
     return NextResponse.json({ error: "Load is no longer open." }, { status: 409 });
   }
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: an unpaid load cannot be claimed.
+  const unfunded = await blockUnlessFunded({ type: "LOAD", id: loadId }, { action: "claimed", actorUserId: authed.userId });
+  if (unfunded) return unfunded;
 
   const worker = await prisma.workerProfile.findUnique({ where: { userId: authed.userId } });
   if (!worker) return NextResponse.json({ error: "Driver profile not found." }, { status: 404 });

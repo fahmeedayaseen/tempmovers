@@ -18,6 +18,7 @@ import { prisma } from "@/lib/db";
 import { requireDispatcher, resolveCarrierAccess, DispatcherAccessError, AuthError } from "@/lib/dispatcher/access";
 import { assertFreightAllowed, FreightGateError } from "@/lib/freight/gate";
 import { canTransitionLoad } from "@/lib/freight/load-lifecycle";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 
 /**
  * Dispatcher load status update — a BROKERED action, so it passes through BOTH
@@ -33,6 +34,8 @@ const schema = z.object({ toStatus: z.string().min(1), reason: z.string().max(10
 
 // Milestones a dispatcher may drive (operational chain only — never financial
 // states like INVOICED/PAID, which are not dispatcher concerns).
+// Pay before dispatch — VASRUE Digital Media, 29 Oct 2026.
+const FREIGHT_DISPATCH_STATUSES = new Set(["ACCEPTED", "DISPATCHED", "AT_PICKUP", "LOADED", "IN_TRANSIT"]);
 const DISPATCHER_ALLOWED_TARGETS = new Set(["AT_PICKUP", "LOADED", "IN_TRANSIT", "AT_DELIVERY", "DELIVERED", "POD_PENDING", "EXCEPTION"]);
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ loadId: string }> }) {
@@ -62,6 +65,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ lo
   try { await assertFreightAllowed({ capability: "loadPosting", userRole: authed.role, marketId: load.marketId, requireAdmin: false }); }
   catch (e) { if (e instanceof FreightGateError) return NextResponse.json({ error: e.message, capability: "loadPosting" }, { status: 403 }); throw e; }
 
+  if (FREIGHT_DISPATCH_STATUSES.has(toStatus)) {
+    const unfunded = await blockUnlessFunded({ type: "FREIGHT_LOAD", id: load.id }, { action: "dispatched", actorUserId: authed.userId });
+    if (unfunded) return unfunded;
+  }
   if (!canTransitionLoad(load.status as never, toStatus as never)) {
     return NextResponse.json({ error: `Cannot move from ${load.status} to ${toStatus}.`, currentStatus: load.status }, { status: 409 });
   }

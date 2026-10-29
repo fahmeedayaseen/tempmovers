@@ -10,6 +10,7 @@
  * policy as everything else; no dedicated settlement permission.
  */
 import { prisma } from "@/lib/db";
+import { onlyPodAcceptedLoads } from "@/lib/payments/settlement";
 import { partitionByMarketAccess } from "@/lib/market-access";
 import type { Prisma } from "@prisma/client";
 
@@ -29,7 +30,7 @@ export async function buildSettlementPreview(
   params: { userId: string; workerId: string; periodStart: Date; periodEnd: Date },
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<SettlementPreview> {
-  const candidates = await client.carrierRoute.findMany({
+  const allCandidates = await client.carrierRoute.findMany({
     where: {
       assignedWorkerId: params.workerId,
       paymentStatus: "CAPTURED",
@@ -38,6 +39,8 @@ export async function buildSettlementPreview(
     },
     include: { originMarket: { select: { id: true, state: true, name: true } } },
   });
+  // Pay before dispatch (29 Oct 2026): prepaid loads wait for POD acceptance.
+  const candidates = await onlyPodAcceptedLoads(client, allCandidates);
 
   const partition = await partitionByMarketAccess(
     params.userId,

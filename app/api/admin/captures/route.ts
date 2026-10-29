@@ -28,9 +28,13 @@ export async function GET(request: Request) {
     throw e;
   }
 
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: prepaid jobs and
+  // loads are CAPTURED from the start, so they wait here to be settled (jobs)
+  // or to have their POD accepted (loads) instead of to be captured. Legacy
+  // bookings still wait AUTHORIZED. `action` tells the console which it is.
   const [jobs, loads] = await Promise.all([
     prisma.job.findMany({
-      where: { status: "COMPLETED", paymentStatus: "AUTHORIZED" },
+      where: { status: "COMPLETED", paymentStatus: { in: ["AUTHORIZED", "CAPTURED"] }, finalTotalCents: null },
       select: {
         id: true, title: true, type: true, estimatedTotalCents: true, platformFeePerHourCents: true, urgentPremiumCents: true, bookingProtectionFeeCents: true,
         customer: { select: { user: { select: { firstName: true, lastName: true } } } },
@@ -39,24 +43,34 @@ export async function GET(request: Request) {
       take: 50,
     }),
     prisma.carrierRoute.findMany({
-      where: { status: "POD_UPLOADED", paymentStatus: "AUTHORIZED" },
+      where: { status: "POD_UPLOADED", paymentStatus: { in: ["AUTHORIZED", "CAPTURED"] } },
       select: { id: true, title: true, grossCarrierCents: true, platformFeeCents: true, accessorialsCents: true },
       orderBy: { updatedAt: "asc" },
       take: 50,
     }),
   ]);
 
-  const jobResults = await Promise.all(jobs.map(async (j) => {
+  const settled = new Set((await prisma.paymentSettlement.findMany({
+    where: { OR: [{ entityType: "JOB", entityId: { in: jobs.map((j) => j.id) } }, { entityType: "LOAD", entityId: { in: loads.map((l) => l.id) } }] },
+    select: { entityId: true },
+  })).map((s) => s.entityId));
+  const prepaid = new Set((await prisma.fundingAttempt.findMany({
+    where: { entityId: { in: [...jobs.map((j) => j.id), ...loads.map((l) => l.id)] } },
+    select: { entityId: true },
+  })).map((f) => f.entityId));
+
+  const jobResults = await Promise.all(jobs.filter((j) => !settled.has(j.id)).map(async (j) => {
     const preview = await calculateJobFinalCaptureAmount(prisma, j);
     const customerName = `${j.customer.user.firstName} ${j.customer.user.lastName}`;
+    const action = prepaid.has(j.id) ? ("settle" as const) : ("capture" as const);
     if (!preview.ok) {
-      return { id: j.id, title: j.title, customerName, type: "job" as const, ready: false as const, reason: preview.reason, estimatedTotalCents: j.estimatedTotalCents };
+      return { id: j.id, title: j.title, customerName, type: "job" as const, ready: false as const, reason: preview.reason, estimatedTotalCents: j.estimatedTotalCents, action };
     }
-    return { id: j.id, title: j.title, customerName, type: "job" as const, ready: true as const, amountCents: preview.finalTotalCents, estimatedTotalCents: j.estimatedTotalCents };
+    return { id: j.id, title: j.title, customerName, type: "job" as const, ready: true as const, amountCents: preview.finalTotalCents, estimatedTotalCents: j.estimatedTotalCents, action };
   }));
 
   return NextResponse.json({
     jobs: jobResults,
-    loads: loads.map((l) => ({ id: l.id, title: l.title, customerName: null, type: "load" as const, ready: true as const, amountCents: l.grossCarrierCents + l.platformFeeCents + (l.accessorialsCents || 0) })),
+    loads: loads.filter((l) => !settled.has(l.id)).map((l) => ({ id: l.id, title: l.title, customerName: null, type: "load" as const, ready: true as const, amountCents: l.grossCarrierCents + l.platformFeeCents + (l.accessorialsCents || 0), action: prepaid.has(l.id) ? ("accept-pod" as const) : ("capture" as const) })),
   });
 }
