@@ -8,7 +8,7 @@
 //                        special items and the "can't take" list, optional
 //                        photos, pickup address and time.
 //   2. Crew & price   — the instant all-in quote from the market's pricing.
-//   3. Review & pay   — creates the booking, then authorises the card through
+//   3. Review & pay   — creates the booking, then collects the full payment (pay before dispatch, 29 Oct 2026) through
 //                        the same StripePaymentForm every other booking uses.
 // The browser never computes a price it sends anywhere: the quote comes from
 // POST /api/junk/quote and the booking route recomputes it on the server.
@@ -35,6 +35,11 @@ type PublicQuote = {
   totalCents: number;
   estimatedHours: number;
   lines: JunkQuoteLine[];
+  // Pay before dispatch, 29 Oct 2026: what the all-in price includes.
+  serviceCents: number;
+  disposalEstimateCents: number;
+  helperHourlyCents: number;
+  helperMinimumHours: number;
 };
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -191,7 +196,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
     <div style={{ maxWidth: 920, margin: "0 auto", padding: "32px 16px 60px" }}>
       <p className="eyebrow">JUNK REMOVAL · INDIANAPOLIS</p>
       <h1 style={{ margin: "0 0 6px" }}>Book junk removal</h1>
-      <p className="footerNote" style={{ marginTop: 0 }}>One all-in price for hauling, labor and disposal. Your card is authorised when you book and charged only once the job is done.</p>
+      <p className="footerNote" style={{ marginTop: 0 }}>One all-in price for hauling, labor and disposal, paid when you book. No crew is sent until your payment has gone through, and any disposal money the dump doesn't use comes back to you.</p>
       <div className="tabs">{stepLabel(1, "What's going")}{stepLabel(2, "Crew & price")}{stepLabel(3, "Review & pay")}</div>
 
       {step === 1 && (
@@ -304,6 +309,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
             <h3 style={{ marginTop: 0 }}>{quote.crewSize === 1 ? "One hauler with a truck" : `A hauler with a truck, plus ${quote.helpersRequired} helper${quote.helpersRequired > 1 ? "s" : ""}`}</h3>
             <p className="footerNote">About {quote.estimatedHours} hour{quote.estimatedHours === 1 ? "" : "s"} on site. Vetted, background-checked crew from the TempMovers network.</p>
             <p className="footerNote">One all-in price: loading, hauling and disposal are included. There is no separate dump fee.</p>
+            {quote.helpersRequired > 0 && <p className="footerNote">Helpers are paid by the hour ({money(quote.helperHourlyCents)}/hr, {quote.helperMinimumHours}-hour minimum). If your job needs more time or another helper, you'll be asked to approve and pay for it first.</p>}
           </section>
           <aside className="panel">
             <p className="eyebrow">YOUR PRICE</p>
@@ -311,6 +317,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
               {quote.lines.map((l) => <div className="quoteRow" key={l.label}><span>{l.label}</span><strong>{money(l.cents)}</strong></div>)}
               <div className="quoteRow total"><span>Total</span><strong>{money(quote.totalCents)}</strong></div>
             </div>
+            <p className="footerNote">Includes {money(quote.disposalEstimateCents)} set aside for the dump. If disposal costs less, the difference is refunded to you in full. If it will cost more, you'll be asked to approve and pay the difference before the crew goes to the dump.</p>
             <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
               <button className="btn btnSecondary" onClick={() => setStep(1)}>Back</button>
               <button className="btn btnPrimary" onClick={() => { setError(null); setStep(3); }}>Continue</button>
@@ -337,7 +344,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
             <div className="quote"><div className="quoteRow total"><span>Total</span><strong>{money(booked?.totalCents ?? quote.totalCents)}</strong></div></div>
             {!booked && (
               <>
-                <p className="footerNote">Booking authorises this amount on your card. You're charged once the crew has finished and you've approved the job.</p>
+                <p className="footerNote">You pay this amount when you book. Your job goes to our crews only after the payment has gone through. Cancel before the crew starts and you get it all back.</p>
                 {error && <p className="footerNote" style={{ color: "#b42318" }}>{error}</p>}
                 <button className="btn btnPrimary" style={{ width: "100%" }} disabled={busy} onClick={book}>{busy ? "Booking…" : "Confirm booking"}</button>
               </>
@@ -349,7 +356,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
             )}
             {authorized && (
               <div className="banner" style={{ marginTop: 14 }}>
-                <strong>You're booked.</strong> Your card is authorised for {money(booked!.totalCents)}. We'll match your crew and you can follow the job from your dashboard.
+                <strong>You're booked.</strong> You've paid {money(booked!.totalCents)}. As soon as the payment clears we match your crew, and you can follow the job from your dashboard.
                 <div style={{ marginTop: 10 }}><a className="btn btnPrimary" href="/">Go to my dashboard</a></div>
               </div>
             )}
