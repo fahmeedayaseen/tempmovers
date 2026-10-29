@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { stripe } from "@/lib/stripe";
 import { requireRole, AuthError } from "@/lib/auth";
-import { evaluateFunding } from "@/lib/payments/funding";
+import { evaluateFunding, sourceChargeFor } from "@/lib/payments/funding";
 import { captureIntegrationAlert } from "@/lib/monitoring";
 
 /**
@@ -37,7 +37,7 @@ export async function POST(request: Request, context: { params: Promise<{ alloca
 
   const funding = await evaluateFunding({ type: allocation.entityType, id: allocation.entityId }, { refresh: true });
   if (funding.disputedCents > 0) return NextResponse.json({ error: "A payment on this job is disputed; the reimbursement is held." }, { status: 409 });
-  const source = await prisma.fundingAttempt.findFirst({ where: { entityType: allocation.entityType, entityId: allocation.entityId, purpose: "INITIAL", stripeChargeId: { not: null } }, orderBy: { createdAt: "asc" } });
+  const sourceChargeId = await sourceChargeFor({ type: allocation.entityType, id: allocation.entityId }, allocation.amountCents);
 
   const idempotencyKey = `allocation:${allocation.id}`;
   const claim = await prisma.paymentAllocation.updateMany({ where: { id: allocation.id, state: "APPROVED_AWAITING_FUNDS" }, data: { state: "RELEASED", transferIdempotencyKey: idempotencyKey } });
@@ -47,7 +47,7 @@ export async function POST(request: Request, context: { params: Promise<{ alloca
     const transfer = await stripe.transfers.create(
       {
         amount: allocation.amountCents, currency: "usd", destination: worker.stripeAccountId,
-        ...(source?.stripeChargeId && { source_transaction: source.stripeChargeId }),
+        ...(sourceChargeId && { source_transaction: sourceChargeId }),
         metadata: { allocationId: allocation.id, purpose: "DISPOSAL_REIMBURSEMENT", jobId: allocation.entityId, workerId: worker.id },
       },
       { idempotencyKey },

@@ -7,7 +7,7 @@ import { captureIntegrationAlert } from "@/lib/monitoring";
 import { queueNotification } from "@/lib/notifications";
 import { payoutStatusTemplate } from "@/lib/email/templates/payments";
 import { isPayBeforeDispatchJob } from "@/lib/payments/settlement";
-import { evaluateFunding } from "@/lib/payments/funding";
+import { evaluateFunding, sourceChargeFor } from "@/lib/payments/funding";
 
 /**
  * Pays out a worker via a real Stripe Transfer to their connected Express
@@ -140,8 +140,7 @@ export async function POST(request: Request, context: { params: Promise<{ payout
     if (allocation.state === "HELD") return NextResponse.json({ error: "This payout is held while a dispute or review on the job is resolved." }, { status: 409 });
     const funding = await evaluateFunding({ type: "JOB", id: payoutJob.jobId }, { refresh: true });
     if (funding.disputedCents > 0) return NextResponse.json({ error: "A payment on this job is disputed or was returned. The payout is held." }, { status: 409 });
-    const initial = await prisma.fundingAttempt.findFirst({ where: { entityType: "JOB", entityId: payoutJob.jobId, purpose: "INITIAL", stripeChargeId: { not: null } }, orderBy: { createdAt: "asc" } });
-    sourceChargeId = initial?.stripeChargeId ?? null;
+    sourceChargeId = await sourceChargeFor({ type: "JOB", id: payoutJob.jobId }, payout.netPayoutCents);
     allocationId = allocation.id;
   }
 
