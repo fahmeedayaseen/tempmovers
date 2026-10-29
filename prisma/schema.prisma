@@ -3321,3 +3321,31 @@ model ShipperQuoteRequest {
   updatedAt        DateTime @updatedAt
   @@index([shipperUserId, status])
 }
+
+// ============================================================================
+// Launch waitlist — VASRUE Digital Media, 29 October 2026.
+// Carl's waitlist work order §4. Signups from the public coming-soon page,
+// kept for the launch-day email. Additive: one new table and one new enum;
+// no existing model, enum or migration is touched.
+// ============================================================================
+
+enum WaitlistAudience {
+  CUSTOMER
+  WORKER
+}
+
+model WaitlistSignup {
+  id        String           @id @default(cuid())
+  email     String
+  audience  WaitlistAudience // CUSTOMER | WORKER
+  zipCode   String?
+  interests String[]
+  hasTruck  Boolean?
+  firstName String?
+  source    String? // UTM / referrer
+  createdAt DateTime         @default(now())
+
+  @@unique([email, audience]) // one email may join BOTH lists, once each
+  @@index([audience])
+  @@index([zipCode])
+}
