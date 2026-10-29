@@ -12,10 +12,17 @@
 //     check out, before/after photos and the dump receipt.
 // Every action goes through the same routes as moving work; the job board adds
 // no money logic of its own.
+//
+// Pay before dispatch, 29 October 2026: every job on this board is already paid
+// for. Pay shows as an estimate (hauler: service earnings; helper: hourly) with
+// its real status, the hauler enters the dump cost against the receipt, and the
+// crew asks the customer to approve and pay for extra time, a helper or a
+// bigger dump bill before doing that work. The server prices all of it.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
 import { authFetch } from "@/lib/client-auth";
+import { PAY_STATUS_LABELS, payStatus } from "@/lib/payments/pay-status";
 import {
   JUNK_ITEMS, JUNK_LOCATION_LABELS, JUNK_SPECIAL_ITEMS, JUNK_TIER_INFO,
   type JunkItemCode, type JunkLocationCode, type JunkSpecialItemCode, type JunkVolumeTierCode,
@@ -136,8 +143,10 @@ export default function JunkJobBoard() {
         )}
       </div>
       <p className="footerNote" style={{ marginTop: 0 }}>
-        {capability.seat === "HAULER" ? "You take the hauler seat: you bring the truck and cover your own dump fees from your share." : "You take a helper seat: loading and carrying alongside the hauler."}
-        {" "}Pay is a flat amount per job, shown before you take it.
+        {capability.seat === "HAULER"
+          ? "You take the hauler seat and bring the truck. You earn the job's service price after disposal, less the 30% platform fee and the helpers' hourly pay, and the dump cost is paid back to you against your receipt."
+          : "You take a helper seat, loading and carrying alongside the hauler. Helpers are paid by the hour, check-in to release, with a minimum."}
+        {" "}Every job here is paid for by the customer before it reaches this board.
       </p>
       {message && <div className="banner">{message}</div>}
 
@@ -152,7 +161,8 @@ export default function JunkJobBoard() {
                 {a.detail ? describe(a.detail) : ""}
                 {a.job.accessNotes && <><br />Access: {a.job.accessNotes}</>}
                 {a.detail?.itemNotes && <><br />Notes: {a.detail.itemNotes}</>}
-                <br />Your {a.seat.toLowerCase()} pay: <strong>{money(a.shareCents)}</strong>{a.payout ? ` · payout ${a.payout.status.toLowerCase()}` : ""}
+                <br />Your {a.seat.toLowerCase()} pay: <strong>{money(a.payout?.netPayoutCents ?? a.shareCents)}</strong>{a.payout ? "" : " (estimate)"} · {PAY_STATUS_LABELS[payStatus(a.payout)]}
+                {a.seat === "HAULER" && <><br />Dump cost is reimbursed separately against the receipt.</>}
               </p>
               {a.detail && a.detail.customerPhotoUrls.length > 0 && (
                 <p className="footerNote">Customer photos: {a.detail.customerPhotoUrls.map((u, i) => <a key={u} href={u} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>photo {i + 1}</a>)}</p>
@@ -179,6 +189,7 @@ export default function JunkJobBoard() {
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadProof(a, kind, f); e.target.value = ""; }} />
                       </label>
                     ))}
+                    {a.seat === "HAULER" && <DisposalEntry assignmentId={a.assignmentId} onSaved={(m) => { setMessage(m); void load(); }} />}
                     {a.seat === "HAULER" && (
                       <label className="btn btnSecondary" style={{ cursor: "pointer" }}>
                         {a.detail.proof.dumpReceipt ? "Dump receipt ✓" : "Dump receipt"}
@@ -189,6 +200,7 @@ export default function JunkJobBoard() {
                   </>
                 )}
               </div>
+              {["ACCEPTED", "CHECKED_IN"].includes(a.status) && <ChangeRequests jobId={a.job.id} seat={a.seat} />}
             </div>
           ))}
         </>
@@ -207,7 +219,7 @@ export default function JunkJobBoard() {
                 <td>{j.title}<div className="footerNote">{j.market ? `${j.market.name}, ${j.market.state}` : ""}</div></td>
                 <td>{new Date(j.startsAt).toLocaleString()}</td>
                 <td>{describe(j.junkRemovalDetail)}<div className="footerNote">Crew: hauler{j.junkRemovalDetail.helpersRequired > 0 ? ` + ${j.junkRemovalDetail.helpersRequired} helper${j.junkRemovalDetail.helpersRequired > 1 ? "s" : ""}` : ""}</div></td>
-                <td><strong>{money(capability.seat === "HAULER" ? j.junkRemovalDetail.haulerShareCents : j.junkRemovalDetail.helperShareCents)}</strong></td>
+                <td><strong>{money(capability.seat === "HAULER" ? j.junkRemovalDetail.haulerShareCents : j.junkRemovalDetail.helperShareCents)}</strong><div className="footerNote">{capability.seat === "HAULER" ? "est., plus dump cost back" : "est., hourly"}</div></td>
                 <td>
                   <button className="btn btnPrimary" disabled={busyId === j.id}
                     onClick={() => run(j.id, () => authFetch(`/api/jobs/${j.id}/assignments`, { method: "POST" }), "You're on this job. The address is now in My junk jobs.")}>
@@ -220,5 +232,97 @@ export default function JunkJobBoard() {
         </table>
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pay before dispatch, 29 October 2026.
+// ---------------------------------------------------------------------------
+
+/** The hauler enters what the dump actually cost; the server checks it against the receipt and the funded allowance. */
+function DisposalEntry({ assignmentId, onSaved }: { assignmentId: string; onSaved: (message: string) => void }) {
+  const [dollars, setDollars] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    const cents = Math.round(Number(dollars) * 100);
+    if (!Number.isFinite(cents) || cents < 0) { onSaved("Enter the dump cost in dollars, for example 72.50."); return; }
+    setBusy(true);
+    try {
+      const res = await authFetch(`/api/junk/assignments/${assignmentId}/disposal`, { method: "POST", body: JSON.stringify({ actualCents: cents }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { onSaved(typeof data.error === "string" ? data.error : "Couldn't save the dump cost."); return; }
+      onSaved(data.held
+        ? `Dump cost saved and sent for review: ${(data.reasons ?? []).join(" ")}`
+        : `Dump cost approved. ${data.disposal?.unusedCents > 0 ? `${money(data.disposal.unusedCents)} unused goes back to the customer.` : ""} You're reimbursed ${money(data.disposal?.actualCents ?? cents)}.`);
+      setDollars("");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+      <input aria-label="Dump cost in dollars" inputMode="decimal" placeholder="Dump cost $" value={dollars} onChange={(e) => setDollars(e.target.value)} style={{ width: 110 }} />
+      <button className="btn btnSecondary" disabled={busy || !dollars} onClick={save}>{busy ? "Saving…" : "Save dump cost"}</button>
+    </span>
+  );
+}
+
+type ChangeOrderRow = { id: string; version: number; kind: string; status: string; deltaCents: number; reason: string };
+
+/** Ask the customer to approve and pay for added work before doing it. */
+function ChangeRequests({ jobId, seat }: { jobId: string; seat: Seat }) {
+  const [orders, setOrders] = useState<ChangeOrderRow[]>([]);
+  const [kind, setKind] = useState<"EXTRA_HOURS" | "EXTRA_HELPER" | "DISPOSAL_OVERAGE">("EXTRA_HOURS");
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const res = await authFetch(`/api/jobs/${jobId}/change-orders`);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) setOrders(data.changeOrders ?? []);
+  }, [jobId]);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function submit() {
+    setBusy(true); setNote(null);
+    const n = Number(amount);
+    const body = kind === "DISPOSAL_OVERAGE"
+      ? { kind, expectedDisposalCents: Math.round(n * 100), reason }
+      : { kind, hours: n, reason };
+    try {
+      const res = await authFetch(`/api/jobs/${jobId}/change-orders`, { method: "POST", body: JSON.stringify(body) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setNote(typeof data.error === "string" ? data.error : "Check the details and try again."); return; }
+      setNote(`Sent to the customer: ${money(data.changeOrder.deltaCents)}. Do the added work only once it shows as paid.`);
+      setAmount(""); setReason("");
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const label: Record<string, string> = { EXTRA_HOURS: "More helper time", EXTRA_HELPER: "Another helper", DISPOSAL_OVERAGE: "Dump will cost more", EXTRA_ITEMS: "Extra items", OTHER: "Other" };
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid #e4e9f2", paddingTop: 10 }}>
+      <p className="footerNote" style={{ margin: "0 0 6px" }}><strong>Need more than was booked?</strong> Ask the customer first; they approve and pay before the extra work.</p>
+      {orders.length > 0 && (
+        <ul className="footerNote" style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+          {orders.map((o) => <li key={o.id}>{label[o.kind] ?? o.kind}: {money(o.deltaCents)} · <strong>{o.status === "PAID" ? "paid, go ahead" : o.status.toLowerCase()}</strong></li>)}
+        </ul>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} aria-label="What is needed">
+          <option value="EXTRA_HOURS">More helper time</option>
+          <option value="EXTRA_HELPER">Another helper</option>
+          {seat === "HAULER" && <option value="DISPOSAL_OVERAGE">Dump will cost more</option>}
+        </select>
+        <input aria-label={kind === "DISPOSAL_OVERAGE" ? "Expected dump cost in dollars" : "Hours"} inputMode="decimal" placeholder={kind === "DISPOSAL_OVERAGE" ? "Expected dump cost $" : "Hours"} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 150 }} />
+        <input aria-label="Reason" placeholder="Why (the customer sees this)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ minWidth: 200 }} />
+        <button className="btn btnSecondary" disabled={busy || !amount || reason.trim().length < 3} onClick={submit}>{busy ? "Sending…" : "Ask the customer"}</button>
+      </div>
+      {note && <p className="footerNote" style={{ marginTop: 6 }}>{note}</p>}
+    </div>
   );
 }

@@ -5,7 +5,7 @@ import { authFetch, NotSignedInError } from "@/lib/client-auth";
 import { loadStripeClient, type StripeInstance, type StripeElements, type StripeElement } from "@/lib/stripe-client";
 
 /**
- * Customer payment authorization UI — Workstream A. Builds a real
+ * Customer payment UI — Workstream A. Builds a real
  * PaymentElement flow against the existing, already-correct backend
  * (job-payment-intent / driver-payment-intent, and the webhook
  * reconciliation that confirms the result), using Stripe.js loaded from
@@ -20,8 +20,13 @@ import { loadStripeClient, type StripeInstance, type StripeElements, type Stripe
  * needs a real npm install, a real dev server, and real Stripe
  * test-mode keys — none of which exist in the sandbox this was written
  * in.
+ *
+ * Pay before dispatch — VASRUE Digital Media, 29 October 2026. The form now
+ * PAYS the full amount (the intents are automatic-capture), and can pay a
+ * change order too. "Paid" here only means the card step finished; the job
+ * is confirmed and dispatched when the server sees the money collected.
  */
-type PaymentEntityType = "job" | "load";
+type PaymentEntityType = "job" | "load" | "changeOrder";
 type Status = "idle" | "creating_intent" | "loading_stripe" | "ready" | "confirming" | "succeeded" | "requires_action" | "error";
 
 export default function StripePaymentForm({
@@ -42,15 +47,17 @@ export default function StripePaymentForm({
   // Both routes accept { jobId } as the body key — the freight route's
   // naming was carried over from an earlier convention; see its own
   // file's comment for why that name stuck for loads too.
-  const intentPath = entityType === "job" ? "/api/stripe/job-payment-intent" : "/api/stripe/driver-payment-intent";
+  const intentPath = entityType === "job" ? "/api/stripe/job-payment-intent"
+    : entityType === "load" ? "/api/stripe/driver-payment-intent"
+    : `/api/change-orders/${entityId}/accept`;
 
   async function startAuthorization() {
     setStatus("creating_intent");
     setErrorMessage(null);
     try {
-      const res = await authFetch(intentPath, { method: "POST", body: JSON.stringify({ jobId: entityId }) });
+      const res = await authFetch(intentPath, { method: "POST", body: JSON.stringify(entityType === "changeOrder" ? {} : { jobId: entityId }) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(typeof data.error === "string" ? data.error : `Could not start payment authorization (${res.status}).`);
+      if (!res.ok) throw new Error(typeof data.error === "string" ? data.error : `Could not start the payment (${res.status}).`);
 
       setStatus("loading_stripe");
       const stripe = await loadStripeClient();
@@ -61,7 +68,7 @@ export default function StripePaymentForm({
       setStatus("ready"); // mounting itself happens in the effect below, once the DOM node this needs actually exists
     } catch (e) {
       setStatus("error");
-      setErrorMessage(e instanceof NotSignedInError ? "Sign in to authorize payment." : e instanceof Error ? e.message : "Something went wrong.");
+      setErrorMessage(e instanceof NotSignedInError ? "Sign in to pay." : e instanceof Error ? e.message : "Something went wrong.");
     }
   }
 
@@ -107,20 +114,20 @@ export default function StripePaymentForm({
   }
 
   if (status === "succeeded") {
-    return <p className="footerNote" style={{ color: "#1a7f37" }}>Payment authorized — {money(amountCents)}. Capture happens once the work is completed and approved.</p>;
+    return <p className="footerNote" style={{ color: "#1a7f37" }}>Paid — {money(amountCents)}. {entityType === "changeOrder" ? "Your crew can go ahead with the change." : "Your booking is confirmed once the payment clears, and only then is a crew dispatched."}</p>;
   }
 
   return (
     <div className="panel" style={{ background: "#f7f9fc", marginTop: 10 }}>
       {status === "idle" && (
-        <button className="btn btnPrimary" onClick={startAuthorization}>Authorize {money(amountCents)} with Stripe</button>
+        <button className="btn btnPrimary" onClick={startAuthorization}>Pay {money(amountCents)} with Stripe</button>
       )}
       {(status === "creating_intent" || status === "loading_stripe") && <p className="footerNote">Preparing secure payment form…</p>}
       {(status === "ready" || status === "confirming") && (
         <form onSubmit={handleConfirm}>
           <div ref={mountPointRef} style={{ minHeight: 200, marginBottom: 12 }} />
           <button className="btn btnPrimary" type="submit" disabled={status === "confirming"}>
-            {status === "confirming" ? "Confirming…" : `Authorize ${money(amountCents)}`}
+            {status === "confirming" ? "Paying…" : `Pay ${money(amountCents)}`}
           </button>
         </form>
       )}

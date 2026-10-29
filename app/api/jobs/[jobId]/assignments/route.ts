@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 import { workerCanServeLocation } from "@/lib/geo";
 import { evaluateWorkerEligibility } from "@/lib/worker-eligibility";
 import { checkOpportunityAccess } from "@/lib/access/opportunity-access";
@@ -70,6 +71,10 @@ export async function POST(request: Request, context: { params: Promise<{ jobId:
   if (!["POSTED", "MATCHING", "PARTIALLY_FILLED"].includes(job.status)) {
     return NextResponse.json({ error: "Job is not accepting workers." }, { status: 409 });
   }
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: no crew on an
+  // unfunded job. Re-reads Stripe on the server; a stale screen cannot pass.
+  const unfunded = await blockUnlessFunded({ type: "JOB", id: jobId }, { action: "crewed", actorUserId: authed.userId });
+  if (unfunded) return unfunded;
 
   const worker = await prisma.workerProfile.findUnique({ where: { userId: authed.userId } });
   if (!worker) return NextResponse.json({ error: "Worker profile not found." }, { status: 404 });

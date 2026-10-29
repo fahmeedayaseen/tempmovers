@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 import { assertFreightAllowed, FreightGateError } from "@/lib/freight/gate";
 import { evaluateOfferAcceptance } from "@/lib/freight/offer-acceptance";
 import { getCarrierEligibility } from "@/lib/carriers/eligibility-service";
@@ -50,6 +51,11 @@ export async function POST(request: Request) {
     if (e instanceof FreightGateError) return NextResponse.json({ error: e.message }, { status: e.status });
     throw e;
   }
+
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: the shipper pays
+  // (or an audited credit-terms exception exists) before a carrier is assigned.
+  const unfunded = await blockUnlessFunded({ type: "FREIGHT_LOAD", id: offer.loadId }, { action: "dispatched", actorUserId: authed.userId });
+  if (unfunded) return unfunded;
 
   // Recheck eligibility via the central service (no duplication here).
   const eligibility = await getCarrierEligibility(offer.carrierId, "BROKER_LOAD_ASSIGNMENT", offer.load.marketId);

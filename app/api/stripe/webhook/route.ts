@@ -6,6 +6,7 @@ import { recoverBonusesForQualifyingEntity } from "@/lib/bonus-ledger";
 import { queueNotification } from "@/lib/notifications";
 import { subscriptionConfirmationTemplate, subscriptionCancellationTemplate, paymentReceiptTemplate, refundNoticeTemplate, payoutStatusTemplate, tipReceivedTemplate } from "@/lib/email/templates/payments";
 import { captureIntegrationAlert } from "@/lib/monitoring";
+import { evaluateFunding, syncFundingAttempt, type FundingRef } from "@/lib/payments/funding";
 
 // ---------------------------------------------------------------------------
 // BLOCK-05 — VASRUE Digital Media, 24 Oct 2026.
@@ -60,10 +61,17 @@ function resolveScreeningPaymentProvider(input: { paymentMethodType?: string | n
  * re-creating/re-sending rather than erroring or double-emailing.
  */
 async function createPaymentTransactionAndSendReceipt(paymentIntentId: string) {
-  const [job, load] = await Promise.all([
+  let [job, load] = await Promise.all([
     prisma.job.findUnique({ where: { stripePaymentIntentId: paymentIntentId }, include: { customer: { include: { user: true } } } }),
     prisma.carrierRoute.findUnique({ where: { stripePaymentIntentId: paymentIntentId }, include: { postedByUser: true } }),
   ]);
+  // Pay before dispatch (29 Oct 2026): a change-order payment is a second
+  // intent on the same job, so it is found through its FundingAttempt.
+  if (!job && !load) {
+    const attempt = await prisma.fundingAttempt.findUnique({ where: { stripePaymentIntentId: paymentIntentId } });
+    if (attempt?.entityType === "JOB") job = await prisma.job.findUnique({ where: { id: attempt.entityId }, include: { customer: { include: { user: true } } } });
+    if (attempt?.entityType === "LOAD") load = await prisma.carrierRoute.findUnique({ where: { id: attempt.entityId }, include: { postedByUser: true } });
+  }
   if (!job && !load) return; // not a job/load PaymentIntent at all (e.g. a subscription charge)
 
   const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
@@ -124,6 +132,62 @@ async function createPaymentTransactionAndSendReceipt(paymentIntentId: string) {
       title: receipt.subject, body: receipt.text, html: receipt.html, idempotencyKey: `payment-receipt:${transaction.stripeChargeId}`,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pay before dispatch — VASRUE Digital Media, 29 October 2026.
+//
+// Every PaymentIntent, charge, refund and dispute event for a funding intent
+// re-reads the intent from Stripe and records the truth on its
+// FundingAttempt (lib/payments/funding.ts). Order and duplicates do not
+// matter: each sync records Stripe's current state, never a delta. A job
+// moves DRAFT -> POSTED only here, on collected funds that pass the gate. A
+// dispute or bank return holds the affected job's unpaid worker payouts.
+// ---------------------------------------------------------------------------
+function fundingPaymentIntentId(event: Stripe.Event): string | null {
+  const ref = (v: string | { id: string } | null | undefined) => (typeof v === "string" ? v : v?.id ?? null);
+  if (event.type.startsWith("payment_intent.")) return (event.data.object as Stripe.PaymentIntent).id;
+  if (event.type === "charge.refunded" || event.type === "charge.succeeded" || event.type === "charge.failed") return ref((event.data.object as Stripe.Charge).payment_intent);
+  if (event.type.startsWith("charge.dispute.")) return ref((event.data.object as Stripe.Dispute).payment_intent);
+  if (event.type === "refund.created" || event.type === "refund.updated") return ref((event.data.object as Stripe.Refund).payment_intent);
+  return null;
+}
+
+async function holdForDispute(ref: FundingRef, eventId: string) {
+  if (ref.type === "JOB") {
+    const held = await prisma.payout.updateMany({
+      where: { assignment: { jobId: ref.id }, status: { in: ["PENDING", "SCHEDULED", "FAILED"] } },
+      data: { status: "HELD" },
+    });
+    await prisma.paymentAllocation.updateMany({
+      where: { entityType: "JOB", entityId: ref.id, state: { in: ["ESTIMATED", "EARNED_PENDING_REVIEW", "APPROVED_AWAITING_FUNDS", "RELEASED"] }, recipient: { in: ["HAULER", "HELPER", "WORKER", "DISPOSAL"] } },
+      data: { state: "HELD" },
+    });
+    await prisma.auditLog.create({ data: { action: "FUNDING_DISPUTE_HOLD", entityType: "Job", entityId: ref.id, details: { stripeEventId: eventId, payoutsHeld: held.count } } });
+  }
+  captureIntegrationAlert("A payment funding a booking was disputed or returned. Unpaid worker payouts for it are held.", { area: "payment", entityType: ref.type, entityId: ref.id, stripeEventId: eventId });
+}
+
+async function applyFundingEvent(paymentIntentId: string, event: Stripe.Event) {
+  const attempt = await syncFundingAttempt(paymentIntentId);
+  let ref: FundingRef | null = attempt ? { type: attempt.entityType, id: attempt.entityId } : null;
+  if (!ref) {
+    // A legacy authorisation captured before dispatch also funds its job.
+    const legacyJob = await prisma.job.findUnique({ where: { stripePaymentIntentId: paymentIntentId }, select: { id: true } });
+    if (legacyJob) ref = { type: "JOB", id: legacyJob.id };
+  }
+  if (!ref) return;
+
+  if (ref.type === "JOB" && (event.type === "payment_intent.succeeded" || event.type === "charge.succeeded")) {
+    const evaluation = await evaluateFunding(ref);
+    if (evaluation.funded) {
+      const posted = await prisma.job.updateMany({ where: { id: ref.id, status: "DRAFT" }, data: { status: "POSTED" } });
+      if (posted.count > 0) {
+        await prisma.auditLog.create({ data: { action: "JOB_FUNDED_AND_POSTED", entityType: "Job", entityId: ref.id, jobId: ref.id, details: { stripeEventId: event.id, collectedCents: evaluation.collectedCents, requiredCents: evaluation.requiredCents, policyVersion: evaluation.policyVersion } } });
+      }
+    }
+  }
+  if (event.type === "charge.dispute.created") await holdForDispute(ref, event.id);
 }
 
 async function processStripeEvent(event: Stripe.Event) {
@@ -512,15 +576,11 @@ async function processStripeEvent(event: Stripe.Event) {
       // never be staffed. Found by driving a real test booking end to end on
       // staging.
       //
-      // Authorised funds are the gate, per the comment above: a job reaches
-      // the marketplace only once Stripe confirms the money is held, never
-      // at creation, so no mover can take an unfunded job. The DRAFT guard
-      // makes this one-way — a job that has already progressed is never
-      // rewound by a re-delivered or out-of-order event.
-      prisma.job.updateMany({
-        where: { stripePaymentIntentId: pi.id, status: "DRAFT" },
-        data: { status: "POSTED" },
-      }),
+      // Pay before dispatch — VASRUE Digital Media, 29 October 2026. An
+      // authorisation is no longer the gate: Carl's payment policy needs the
+      // money COLLECTED before a job reaches the marketplace. The DRAFT ->
+      // POSTED step now happens in applyFundingEvent() below, on
+      // payment_intent.succeeded, and only when the funding gate passes.
       prisma.carrierRoute.updateMany({
         where: { stripePaymentIntentId: pi.id },
         data: { paymentStatus: "AUTHORIZED" },
@@ -918,6 +978,10 @@ async function processStripeEvent(event: Stripe.Event) {
       area: "payout", stripeAccountId: event.account, stripePayoutId: payoutObj.id, failureCode: payoutObj.failure_code ?? null, failureMessage: payoutObj.failure_message ?? null,
     });
   }
+
+  // Pay before dispatch (29 Oct 2026): keep funding records in step with Stripe.
+  const fundingIntent = fundingPaymentIntentId(event);
+  if (fundingIntent) await applyFundingEvent(fundingIntent, event);
 }
 
 export async function POST(request: Request) {

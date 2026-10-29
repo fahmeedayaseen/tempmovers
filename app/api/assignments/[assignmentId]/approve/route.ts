@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { MINIMUM_JOB_HOURS } from "@/lib/pricing";
+import { isPayBeforeDispatchJob } from "@/lib/payments/settlement";
 
 /**
  * Customer (or admin, for disputes) approves the actual hours worked. This is
@@ -53,6 +54,10 @@ export async function POST(request: Request, context: { params: Promise<{ assign
   const billedHours = Math.max(MINIMUM_JOB_HOURS, Number(assignment.actualHours));
   const grossEarningsCents = isJunkSeat ? assignment.agreedEarningsCents : Math.round(assignment.agreedEarningsCents * billedHours);
   const isFirstCompletion = assignment.worker.completedJobs < 1 && !assignment.worker.firstCompletedJobAt;
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: on a prepaid job
+  // approval records earned pay as PENDING; settlement sets the final amount
+  // and releases it (payment spec §7). A check-out click alone never releases money.
+  const prepaid = await isPayBeforeDispatchJob(assignment.jobId);
 
   const [updatedAssignment, payout] = await prisma.$transaction([
     prisma.assignment.update({
@@ -62,7 +67,7 @@ export async function POST(request: Request, context: { params: Promise<{ assign
     prisma.payout.create({
       data: {
         workerId: assignment.workerId, assignmentId: assignment.id,
-        grossEarningsCents, netPayoutCents: grossEarningsCents, status: "SCHEDULED",
+        grossEarningsCents, netPayoutCents: grossEarningsCents, status: prepaid ? "PENDING" : "SCHEDULED",
       },
     }),
     // This is the actual, safe, authenticated place completedJobs advances

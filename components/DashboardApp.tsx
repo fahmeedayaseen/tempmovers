@@ -5,6 +5,7 @@ import { calculateBoxTruckLoadQuote, calculateJobQuote, calculateSemiLoadQuote }
 import { authFetch, getAuthToken, NotSignedInError } from "@/lib/client-auth";
 import LoadBoard from "./LoadBoard";
 import StripePaymentForm from "./StripePaymentForm";
+import CustomerJobPayments from "./CustomerJobPayments";
 import TipForm from "./TipForm";
 import WorkerProfileCard, { type WorkerCardData } from "./WorkerProfileCard";
 // Junk removal — VASRUE Digital Media, 28 Oct 2026: the worker-side junk board.
@@ -139,7 +140,7 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
 
       setPostedJobId(jobData.job?.id ?? null);
       setPostedJobAmountCents(jobData.job?.estimatedTotalCents ?? 0);
-      setPostJobMessage(`Job posted — estimated total ${money(jobData.job?.estimatedTotalCents ?? 0)}. Authorize payment below to confirm the booking.`);
+      setPostJobMessage(`Job posted — estimated total ${money(jobData.job?.estimatedTotalCents ?? 0)}. Pay below to confirm the booking. No crew is dispatched until the payment goes through.`);
     } catch (e) {
       setPostJobMessage(e instanceof NotSignedInError ? "Sign in to post a job." : e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -217,7 +218,7 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
 
       setPostedLoadId(data.load?.id ?? null);
       setPostedLoadAmountCents(data.totalCents ?? 0);
-      setFreightMessage(`Load posted — total ${money(data.totalCents ?? 0)}. Authorize payment below to confirm the booking.`);
+      setFreightMessage(`Load posted — total ${money(data.totalCents ?? 0)}. Pay below to confirm it. Carriers can claim it only after the payment goes through.`);
     } catch (e) {
       setFreightMessage(e instanceof NotSignedInError ? "Sign in to post a freight load." : e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -236,6 +237,8 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
   const [myLoads, setMyLoads] = useState<MyLoadRow[] | null>(null);
   const [myJobsLoadsError, setMyJobsLoadsError] = useState<string | null>(null);
   const [tippingEntity, setTippingEntity] = useState<{ type: "job" | "load"; id: string } | null>(null);
+  // Pay before dispatch (VASRUE Digital Media, 29 Oct 2026): per-job payment panel.
+  const [paymentPanelJobId, setPaymentPanelJobId] = useState<string | null>(null);
   type SentInvitationRow = { id: string; status: string; expiresAt: string | null; respondedAt: string | null; createdAt: string; worker: { id: string; displayName: string } };
   const [trackingEntity, setTrackingEntity] = useState<{ type: "job" | "load"; id: string } | null>(null);
   const [sentInvitations, setSentInvitations] = useState<SentInvitationRow[] | null>(null);
@@ -592,7 +595,9 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
   // Admin capture triggers — GET /api/admin/captures (new lookup) +
   // the existing, already-correct POST capture-payment routes for jobs
   // and freight loads, neither of which had any UI caller before this.
-  type CaptureReadyItem = { id: string; title: string; customerName: string | null; type: "job" | "load" } & (
+  // Pay before dispatch (29 Oct 2026): prepaid jobs are settled and prepaid
+  // loads have their POD accepted here; only legacy bookings are captured.
+  type CaptureReadyItem = { id: string; title: string; customerName: string | null; type: "job" | "load"; action?: "capture" | "settle" | "accept-pod" } & (
     | { ready: true; amountCents: number; estimatedTotalCents?: number }
     | { ready: false; reason: string; estimatedTotalCents: number }
   );
@@ -625,7 +630,7 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
       const res = await authFetch(path, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(typeof data.error === "string" ? data.error : `Capture failed (${res.status}).`);
-      setCaptureMessage(`Captured ${item.title}.`);
+      setCaptureMessage(item.action === "settle" ? `Settled ${item.title}.${data.refundCents > 0 ? ` ${money(data.refundCents)} unused refunded to the customer.` : ""}${data.exceptions?.length ? ` Needs review: ${data.exceptions.join(" ")}` : ""}` : item.action === "accept-pod" ? `POD accepted for ${item.title}; it can now go into the carrier's settlement.` : `Captured ${item.title}.`);
       await loadCaptureReadyItems();
     } catch (e) {
       setCaptureMessage(e instanceof NotSignedInError ? "Sign in as an admin to capture payments." : e instanceof Error ? e.message : "Capture failed.");
@@ -2113,7 +2118,7 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
                   </>
                 )}
               </section>
-              <aside className="panel"><p className="eyebrow">STRIPE PAYMENT FLOW</p><h3>Protected checkout</h3><ol className="footerNote"><li>Authorize the estimated job total.</li><li>Workers check in with GPS plus customer PIN.</li><li>Final approved hours are captured.</li><li>Stripe Connect transfers worker earnings.</li><li>TempMovers retains $5 per scheduled man-hour or $7 per urgent man-hour.</li><li>The $9.95 booking-protection fee is retained by TempMovers.</li></ol></aside>
+              <aside className="panel"><p className="eyebrow">STRIPE PAYMENT FLOW</p><h3>Protected checkout</h3><ol className="footerNote"><li>Pay the job total when you book. No crew is dispatched until it has gone through.</li><li>Workers check in with GPS plus customer PIN.</li><li>Extra time is approved and paid by you before it is worked.</li><li>Approved hours settle the job; anything unused is refunded in full.</li><li>Stripe Connect transfers worker earnings after the job is settled.</li><li>TempMovers retains $5 per scheduled man-hour or $7 per urgent man-hour.</li><li>The $9.95 booking-protection fee is retained by TempMovers.</li></ol></aside>
             </div>
             <div className="dashboardGrid" style={{marginTop:20}}>
               <section className="panel" ref={freightPostingPanelRef}>
@@ -2196,8 +2201,12 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
                                 {item.kind === "job" && item.status !== "COMPLETED" && item.status !== "CANCELED" && <button className="btn btnPrimary" style={{marginRight:6}} onClick={() => toggleApprovalExpansion(item.id)}>{isApproving ? "Hide" : "Approve hours"}</button>}
                                 <button className="btn btnSecondary" style={{marginRight:6}} onClick={() => handleToggleTrackInvitations(item.kind, item.id)}>{isTracking ? "Hide invitations" : "Track invitations"}</button>
                                 {eligible && <button className="btn btnSecondary" onClick={() => setTippingEntity(isTipping ? null : { type: item.kind, id: item.id })}>{isTipping ? "Hide" : "Leave a tip"}</button>}
+                                {item.kind === "job" && <button className="btn btnSecondary" style={{marginLeft:6}} onClick={() => setPaymentPanelJobId(paymentPanelJobId === item.id ? null : item.id)}>{paymentPanelJobId === item.id ? "Hide payment" : "Payment & changes"}</button>}
                               </td>
                             </tr>
+                            {item.kind === "job" && paymentPanelJobId === item.id && (
+                              <tr><td colSpan={4}><CustomerJobPayments jobId={item.id} jobStatus={item.status} onChanged={loadMyJobsAndLoads} /></td></tr>
+                            )}
                             {isTracking && (
                               <tr><td colSpan={4}>
                                 <div className="panel" style={{background:"#f7f9fc"}}>
@@ -2514,10 +2523,10 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
             </div>
             <div className="dashboardGrid" style={{marginTop:20}}>
               <section className="panel">
-                <div className="panelHead"><div><p className="eyebrow">LIVE ACTION</p><h3>Capture-ready payments</h3></div></div>
+                <div className="panelHead"><div><p className="eyebrow">LIVE ACTION</p><h3>Ready to settle</h3></div></div>
                 {captureError && <p className="footerNote">{captureError}</p>}
                 {!captureItems && !captureError && <p className="footerNote">Loading…</p>}
-                {captureItems && captureItems.jobs.length === 0 && captureItems.loads.length === 0 && <p className="footerNote">Nothing is currently authorized and waiting on capture.</p>}
+                {captureItems && captureItems.jobs.length === 0 && captureItems.loads.length === 0 && <p className="footerNote">Nothing is waiting to be settled, accepted or captured.</p>}
                 {captureItems && (captureItems.jobs.length > 0 || captureItems.loads.length > 0) && (
                   <table className="table"><thead><tr><th>Title</th><th>Customer</th><th>Amount</th><th></th></tr></thead>
                     <tbody>
@@ -2528,12 +2537,12 @@ export default function DashboardApp({ initialRole, initialService }: { initialR
                           <td>
                             {item.ready ? money(item.amountCents) : (
                               <>
-                                <span style={{color:"#637089"}}>Authorized estimate: {money(item.estimatedTotalCents)}</span>
+                                <span style={{color:"#637089"}}>{item.action === "capture" ? "Authorized estimate" : "Collected at booking"}: {money(item.estimatedTotalCents)}</span>
                                 <small style={{display:"block",color:"#b3261e"}}>{item.reason}</small>
                               </>
                             )}
                           </td>
-                          <td><button className="btn btnPrimary" disabled={!item.ready || captureBusyId === item.id} title={item.ready ? undefined : "Final hours must be customer-approved before this can be captured."} onClick={() => handleCapture(item)}>{captureBusyId === item.id ? "Capturing…" : "Capture"}</button></td>
+                          <td><button className="btn btnPrimary" disabled={!item.ready || captureBusyId === item.id} title={item.ready ? undefined : "Final hours must be customer-approved before this can be captured."} onClick={() => handleCapture(item)}>{captureBusyId === item.id ? "Working…" : item.action === "settle" ? "Settle" : item.action === "accept-pod" ? "Accept POD" : "Capture"}</button></td>
                         </tr>
                       ))}
                     </tbody>

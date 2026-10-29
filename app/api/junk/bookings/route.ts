@@ -6,8 +6,11 @@ import { requireRole, AuthError } from "@/lib/auth";
 import { geocodeAddress, GeocodingNotConfiguredError } from "@/lib/geocoding";
 import { queueNotification } from "@/lib/notifications";
 import { bookingConfirmationTemplate } from "@/lib/email/templates/booking";
-import { calculateJunkQuote, JunkQuoteError, JUNK_TIER_INFO, toPublicJunkQuote } from "@/lib/junk/pricing";
-import { findJunkMarketForZip, resolveJunkMarketPricing } from "@/lib/junk/market-pricing";
+import { JunkQuoteError, JUNK_TIER_INFO } from "@/lib/junk/pricing";
+import { findJunkMarketForZip } from "@/lib/junk/market-pricing";
+import { quoteJunkForMarket } from "@/lib/junk/full-quote";
+import { JunkAllocationError } from "@/lib/junk/allocation";
+import { recordQuoteVersion } from "@/lib/payments/funding";
 import { junkJobDetailsSchema } from "@/lib/junk/request-schema";
 import { isKeyUnder, junkBookingPhotoPrefix, MAX_JUNK_PHOTOS_PER_SET } from "@/lib/junk/storage-keys";
 
@@ -22,10 +25,17 @@ import { isKeyUnder, junkBookingPhotoPrefix, MAX_JUNK_PHOTOS_PER_SET } from "@/l
  * POST /api/stripe/job-payment-intent, which charges job.estimatedTotalCents.
  *
  * The price is recomputed here from the market's own pricing — never taken
- * from the request — and snapshotted onto the booking: the all-in price, the
- * platform's take, the crew pool and each seat's share. Those numbers do not
- * move afterwards; the crew is paid them at approval and the customer is
- * charged the same all-in amount at capture.
+ * from the request — and snapshotted onto the booking.
+ *
+ * Pay before dispatch — VASRUE Digital Media, 29 October 2026. Priced under
+ * the full junk allocation (payment spec §5–§6, junk spec §5a): the disposal
+ * set-aside is carved out of the all-in price, the platform fee is taken on
+ * the service subtotal only, helpers are planned hourly, and the hauler
+ * gets the rest plus the disposal reimbursement. The quote is written as an
+ * immutable QuoteVersion with that plan, and a DisposalExpense row holds the
+ * set-aside until the dump receipt settles it. The customer pays the full
+ * total before any crew is dispatched; the job reaches the board only once
+ * the payment is collected.
  */
 const schema = z.object({
   addressId: z.string().cuid(),
@@ -95,14 +105,14 @@ export async function POST(request: Request) {
     where: { marketId: market.id, status: "ACTIVE", zipCodes: { has: address.postalCode.slice(0, 5) } },
   });
 
-  const pricing = await resolveJunkMarketPricing(market.marketCode);
-  let quote;
+  let full;
   try {
-    quote = calculateJunkQuote({ ...pricing, ...input.details });
+    full = await quoteJunkForMarket(market.marketCode, input.details);
   } catch (e) {
-    if (e instanceof JunkQuoteError) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof JunkQuoteError || e instanceof JunkAllocationError) return NextResponse.json({ error: e.message }, { status: 400 });
     throw e;
   }
+  const { base: quote, plan } = full;
 
   const d = input.details;
   const what = d.pricingMode === "VOLUME" && d.volumeTier
@@ -124,7 +134,7 @@ export async function POST(request: Request) {
       postingMode: "OPEN_MARKETPLACE",
       startsAt,
       estimatedHours: quote.estimatedHours,
-      // Junk has no hourly floor or hourly rate; the crew is paid flat shares.
+      // Junk is a fixed all-in price; helper time is planned in the quote plan.
       minimumHours: 0,
       moversRequired: quote.crewSize,
       customerMoverRateCents: 0,
@@ -132,11 +142,12 @@ export async function POST(request: Request) {
       urgentPremiumCents: 0,
       bookingProtectionFeeCents: quote.bookingProtectionFeeCents,
       // total = subtotal + platform fee + booking protection, the same identity
-      // every other job keeps: subtotal is the crew's pool, the fee is the take.
-      estimatedSubtotalCents: quote.crewPoolCents,
-      estimatedPlatformFeeCents: quote.platformTakeCents,
-      estimatedTotalCents: quote.totalCents,
-      pricingSnapshot: quote as unknown as Prisma.InputJsonObject,
+      // every other job keeps: here the subtotal is the crew's pay plus the
+      // disposal set-aside, and the fee is 30% of the service subtotal.
+      estimatedSubtotalCents: plan.allInCents - plan.platformFeeCents,
+      estimatedPlatformFeeCents: plan.platformFeeCents,
+      estimatedTotalCents: plan.totalCents,
+      pricingSnapshot: plan as unknown as Prisma.InputJsonObject,
       junkRemovalDetail: {
         create: {
           pricingMode: d.pricingMode,
@@ -150,18 +161,28 @@ export async function POST(request: Request) {
           photoKeys: input.photoKeys,
           servicePriceCents: quote.servicePriceCents,
           surchargesCents: quote.surchargesCents,
-          takeRatePercent: quote.takeRatePercent,
-          platformTakeCents: quote.platformTakeCents,
-          crewPoolCents: quote.crewPoolCents,
+          takeRatePercent: Math.round(plan.platformFeeBps / 100),
+          platformTakeCents: plan.platformFeeCents,
+          crewPoolCents: plan.subtotalCents - plan.platformFeeCents,
           helpersRequired: quote.helpersRequired,
-          helperSharePercent: quote.helperSharePercent,
-          haulerShareCents: quote.haulerShareCents,
-          helperShareCents: quote.helperShareCents,
+          // Helpers are paid hourly now, not a share; these are the planned amounts.
+          helperSharePercent: 0,
+          haulerShareCents: plan.haulerServiceCents,
+          helperShareCents: plan.helperCompCents[0] ?? 0,
+          estimatedDumpFeeCents: plan.disposalCents,
         },
       },
     },
     select: { id: true, title: true, status: true, startsAt: true, estimatedTotalCents: true, paymentStatus: true },
   });
+
+  await recordQuoteVersion({ type: "JOB", id: job.id }, {
+    totalCents: plan.totalCents,
+    lines: full.publicQuote.lines as unknown as Prisma.InputJsonArray,
+    plan: plan as unknown as Prisma.InputJsonObject,
+    createdByUserId: authed.userId,
+  });
+  await prisma.disposalExpense.create({ data: { jobId: job.id, estimatedCents: plan.disposalCents } });
 
   const customerUser = await prisma.user.findUnique({ where: { id: authed.userId }, select: { id: true, firstName: true } });
   if (customerUser) {
@@ -173,9 +194,9 @@ export async function POST(request: Request) {
   }
 
   await prisma.auditLog.create({
-    data: { actorId: authed.userId, action: "JUNK_JOB_BOOKED", entityType: "Job", entityId: job.id, details: { marketCode: market.marketCode, totalCents: quote.totalCents, crewSize: quote.crewSize } },
+    data: { actorId: authed.userId, action: "JUNK_JOB_BOOKED", entityType: "Job", entityId: job.id, details: { marketCode: market.marketCode, totalCents: plan.totalCents, crewSize: quote.crewSize, repriced: plan.repriced, policyVersion: plan.policyVersion } },
   });
 
   // The crew split stays internal: the customer gets the job and its all-in price.
-  return NextResponse.json({ job, quote: toPublicJunkQuote(quote) }, { status: 201 });
+  return NextResponse.json({ job, quote: full.publicQuote }, { status: 201 });
 }

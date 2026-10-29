@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 
 const TRANSITIONS: Record<string, string[]> = {
   ASSIGNED: ["IN_TRANSIT", "CANCELED"],
@@ -33,6 +34,11 @@ export async function POST(request: Request, context: { params: Promise<{ loadId
   const allowed = TRANSITIONS[load.status] ?? [];
   if (!allowed.includes(parsed.data.status)) {
     return NextResponse.json({ error: `Cannot move from ${load.status} to ${parsed.data.status}.` }, { status: 409 });
+  }
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: pickup is the service start for a load.
+  if (parsed.data.status === "IN_TRANSIT") {
+    const unfunded = await blockUnlessFunded({ type: "LOAD", id: loadId }, { action: "picked up", actorUserId: authed.userId });
+    if (unfunded) return unfunded;
   }
 
   const updated = await prisma.$transaction(async (tx) => {

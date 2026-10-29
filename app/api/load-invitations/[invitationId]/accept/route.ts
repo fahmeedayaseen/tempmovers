@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
+import { blockUnlessFunded } from "@/lib/payments/funding";
 import { claimFreightLoad } from "@/lib/freight-claim";
 import { queueNotification } from "@/lib/notifications";
 import { invitationResponseTemplate } from "@/lib/email/templates/booking";
@@ -37,6 +38,10 @@ export async function POST(request: Request, context: { params: Promise<{ invita
     await prisma.carrierRouteInvitation.update({ where: { id: invitationId }, data: { status: "EXPIRED" } });
     return NextResponse.json({ error: "This invitation has expired." }, { status: 409 });
   }
+
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: an unpaid load cannot be claimed.
+  const unfunded = await blockUnlessFunded({ type: "LOAD", id: invitation.carrierRouteId }, { action: "claimed", actorUserId: authed.userId });
+  if (unfunded) return unfunded;
 
   const result = await claimFreightLoad(invitation.carrierRouteId, worker.id, authed.userId, "LOAD_ASSIGNED_VIA_INVITATION");
   if (!result.ok) {

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireRole, AuthError } from "@/lib/auth";
 import { generateDriverReferralBonus } from "@/lib/bonus-generators";
 import { captureIntegrationAlert } from "@/lib/monitoring";
+import { settleLoad, SettlementError } from "@/lib/payments/settlement";
 
 /**
  * Captures a freight load's PaymentIntent. Admin-only, gated on POD having
@@ -21,6 +22,19 @@ export async function POST(request: Request, context: { params: Promise<{ loadId
 
   const load = await prisma.carrierRoute.findUnique({ where: { id: loadId } });
   if (!load) return NextResponse.json({ error: "Load not found." }, { status: 404 });
+
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: a prepaid load was
+  // collected at posting. This admin step now accepts the POD and records the
+  // load's settlement, which is what releases it to the carrier's settlement.
+  if ((await prisma.fundingAttempt.count({ where: { entityType: "LOAD", entityId: loadId } })) > 0) {
+    try {
+      const outcome = await settleLoad(loadId, authed.userId);
+      return NextResponse.json({ podAccepted: true, ...outcome });
+    } catch (e) {
+      if (e instanceof SettlementError) return NextResponse.json({ error: e.message }, { status: e.status });
+      throw e;
+    }
+  }
   if (load.status !== "POD_UPLOADED") {
     return NextResponse.json({ error: "Proof of delivery must be uploaded before payment capture." }, { status: 409 });
   }

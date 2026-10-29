@@ -42,10 +42,11 @@ const SERVICES = [
 ];
 
 const WAYPOINTS = [
-  { label: "Book", title: "Tell us what's moving", copy: "Pickup, drop-off, date, and what you need — instant pricing, no calls." },
+  { label: "Book", title: "Tell us what's moving", copy: "Pickup, drop-off, date, and what you need — instant pricing, paid when you book." },
   { label: "Match", title: "We match the right crew", copy: "A vetted mover, box truck, or carrier accepts based on your route and timing." },
   { label: "Move", title: "Track it in real time", copy: "See who's assigned and where they are, from check-in to check-out." },
-  { label: "Deliver", title: "Pay only when it's done", copy: "Your card is charged once the job is confirmed complete — no upfront risk." },
+  // Pay before dispatch — VASRUE Digital Media, 29 Oct 2026: paid at booking, settled at the end.
+  { label: "Deliver", title: "Settled when it's done", copy: "Approved hours settle the job, and anything you prepaid but didn't use is refunded in full." },
 ];
 
 const TRUST_ITEMS = [

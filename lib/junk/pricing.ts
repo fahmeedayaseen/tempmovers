@@ -201,7 +201,7 @@ export function toPublicJunkQuote(quote: JunkQuote) {
 }
 
 /** How big the job is on the tier scale (0 = single item … 5 = full truck). */
-function sizeRank(input: JunkQuoteInput): number {
+export function sizeRank(input: Pick<JunkQuoteInput, "pricingMode" | "volumeTier" | "items">): number {
   if (input.pricingMode === "VOLUME") return JUNK_VOLUME_TIERS.indexOf(input.volumeTier as JunkVolumeTierCode);
   const count = (input.items ?? []).reduce((n, i) => n + i.quantity, 0);
   if (count <= 1) return 0;
@@ -210,7 +210,7 @@ function sizeRank(input: JunkQuoteInput): number {
   return 4;
 }
 
-function isHardJob(input: Pick<JunkQuoteInput, "itemLocation" | "hasHeavyItems" | "specialItems">): boolean {
+export function isHardJob(input: Pick<JunkQuoteInput, "itemLocation" | "hasHeavyItems" | "specialItems">): boolean {
   return input.hasHeavyItems
     || input.itemLocation === "BASEMENT" || input.itemLocation === "UPSTAIRS"
     || input.specialItems.includes("PIANO") || input.specialItems.includes("HOT_TUB");
