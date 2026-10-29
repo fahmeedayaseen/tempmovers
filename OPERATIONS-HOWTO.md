@@ -339,10 +339,10 @@ Added 28 October 2026 from the junk-removal build spec (11-page revision), on it
 **How it runs**
 
 - The customer books at `/book/junk` — linked from the homepage Junk Removal card and footer — in three steps: what's going, crew and price, review and pay. Pricing is by truckload tier or by item, with a minimum. The quote is one all-in price with disposal included; the $9.95 booking protection is the only amount added on top.
-- The card is authorised at booking. Like every booking, the job reaches workers only once Stripe confirms the money is held.
-- The crew is a hauler, who brings the truck, plus up to two helpers, sized from the load and how hard it is to reach. Each seat pays a flat amount fixed at booking: the platform keeps its take-rate out of the price (30% by default); each helper gets a share of the crew's part (25% each by default); the hauler keeps the rest and covers their own dump fees from it.
+- Since 29 October the full amount is collected at booking (§13). Like every booking, the job reaches workers only once the money is confirmed collected.
+- The crew is a hauler, who brings the truck, plus up to two helpers, sized from the load and how hard it is to reach. Since 29 October pay follows the full allocation in §13: the disposal set-aside comes out of the price first, the platform fee is 30% of what is left, helpers are paid by the hour, and the hauler gets the rest plus the disposal reimbursement against the dump receipt.
 - Junk jobs reach junk-only accounts (sign-up options "Box truck — junk removal only" and "Junk removal only"), and movers and box-truck drivers who switch on **Take junk removal jobs** in their dashboard. Their dashboard has a junk board: open jobs with what their seat pays, then their own jobs with the address, check in and out, before and after photos, and the dump receipt.
-- The customer approves the crew as with any job; payouts are the flat shares; capture charges exactly the quoted total.
+- The customer approves the crew as with any job; the job is then settled (§13), which fixes each person's pay and refunds anything unused.
 
 **Switching it on for a market**
 
@@ -360,10 +360,87 @@ PUT /api/admin/pricing
 
 Anything left out keeps its default; `"junkPriceTable": null` resets a market to the defaults. All amounts are integer cents. Special-item surcharges default to $0 until they are set.
 
+Since 29 October `junkHelperSharePercent` no longer affects pay (helpers are hourly) and the junk platform fee comes from the payment policy's `junkPlatformFeeBps` (§13), not `junkTakeRatePercent`. The tier, item and surcharge prices here still set the all-in price.
+
 **Photos and receipts**
 
 They use the same private storage as worker documents. Until the storage bucket is configured, the upload buttons say so plainly and everything else works.
 
 **Open decisions for the owner**
 
-Confirm the Indianapolis prices; set the special-item surcharges; confirm the helper share and the crew-size rule (one hauler alone for a small curbside pickup, a helper for anything inside, heavy or larger, two helpers for a large load that is also heavy or upstairs or in a basement).
+Confirm the Indianapolis prices; set the special-item surcharges; confirm the crew-size rule (one hauler alone for a small curbside pickup, a helper for anything inside, heavy or larger, two helpers for a large load that is also heavy or upstairs or in a basement). The pay values are in §13.
+
+## 13. Pay before dispatch
+
+Added 29 October 2026 from the pay-before-dispatch work order and the payment structure spec v1.0, on its own branch, `feature/pay-before-dispatch`, cut from the junk branch. Additive migration `20261029150000_add_pay_before_dispatch`: new enums and tables only, nothing existing changed. Re-validated the same way as junk: typecheck, the full suite, and a 52-check end-to-end run on the staging deployment with Stripe test cards.
+
+**How it runs**
+
+- The customer pays the full amount when they book, by card. The job sits in `DRAFT` until the server sees the money collected; only then does it reach workers. An authorisation, a pending bank payment or a browser success page never counts.
+- The same check runs on the server at every path that dispatches or starts work: a worker taking a job, accepting an invitation, checking in; a driver claiming or picking up a load; a dispatcher or admin moving a brokered load; a carrier accepting an offer. A stale screen cannot start an unpaid job. The open load board lists only paid loads.
+- Added work is a change order: the crew (or an admin) proposes it, the server prices it, the customer approves and pays it in their dashboard, and only a paid change order lets the extra work count. Extra hours, another helper, extra items and a dump bill over the allowance are the kinds.
+- When every worker's hours are approved, the admin **settles** the job — the same button that used to capture. Settlement works out the final amount (approved hours, or the junk allocation), refunds anything prepaid and unused in full, writes one allocation row for every cent collected, and releases worker payouts. Payouts are `PENDING` from approval until settlement, then `SCHEDULED`; a payout cannot be paid before the job is settled.
+- A customer can cancel before the crew checks in and is refunded in full, booking protection included. There is no cancellation fee until one is set.
+- For loads, accepting the proof of delivery (the same admin button) records the load's settlement; a prepaid load joins the carrier's settlement batch only after that.
+- Legacy bookings made under the old terms still work: an authorised one is collected in full with `POST /api/admin/jobs/{id}/collect-legacy` (nothing is charged twice) and then follows the new path.
+
+**Junk pay (the full allocation)**
+
+Disposal set-aside out of the all-in price first, with no platform cut on it; platform fee 30% of the service subtotal, rounded once; helpers $30 an hour from check-in to release, 2-hour minimum, 15-minute steps; the hauler gets the rest plus the disposal reimbursement against the receipt. A second helper raises the price so the hauler is never docked for it; a quote that would leave the hauler under the earnings floor after the truck allowance is repriced up. The hauler enters the dump cost from their job card; with a receipt on file and an amount within the allowance it is approved on the spot and any unused allowance is refunded to the customer. Anything else is held for admin review:
+
+```bash
+POST /api/admin/disposal/{jobId}/review
+{ "decision": "APPROVE", "approvedCents": 9000, "note": "Receipt checked by phone", "waiveReceipt": true }
+```
+
+Approving without a receipt needs `waiveReceipt` and a note, and is written as an audited exception. A missing receipt holds only the reimbursement, never the rest of anyone's pay. The approved reimbursement is paid on its own with `POST /api/admin/allocations/{allocationId}/transfer`.
+
+**The values, per market**
+
+Every number below is a proposal until the owner approves it. They apply to new quotes; booked jobs keep the snapshot they were quoted with.
+
+```bash
+GET  /api/admin/payment-policy?marketCode=INDY
+PATCH /api/admin/payment-policy
+{ "marketCode": "INDY", "junkPlatformFeeBps": 3000, "helperHourlyCents": 3000, "helperMinimumMinutes": 120,
+  "helperIncrementMinutes": 15, "haulerFloorCents": 4000, "truckAllowanceCents": 1000,
+  "disposalEstimatesCents": { "HALF": 8000 }, "disposalAddersCents": { "FREON_APPLIANCE": 2000 },
+  "disposalAutoApproveCents": 20000, "reviewWindowHours": 24, "achEnabled": false, "markCarlApproved": true }
+```
+
+Anything left out keeps its current value; a market falls back to `US-DEFAULT`, then to the built-in proposals. `markCarlApproved` records the owner's sign-off date. Keep `achEnabled` off until bank payments have been tested; cards are collected immediately, and bank debits only count once the funds are available.
+
+**Seeing the money**
+
+`GET /api/admin/funding?type=JOB&id={jobId}` shows the gate's verdict re-read from Stripe and everything behind it: quote versions, each payment and its state, change orders, the settlement and its allocations, the disposal record, refunds, exceptions, and whether the allocations add up to what was collected. Customers see their own payment, change orders, receipts and refunds under **Payment & changes** on each job; workers see only their own pay basis and status.
+
+**Exceptions, written down**
+
+`POST /api/admin/payment-exceptions` with `{ "action": "create", "entityType": "JOB", "entityId": "...", "kind": "CREDIT_TERMS", "reason": "..." }` lets an unpaid job or load dispatch under agreed credit terms; `"kind": "EVIDENCE_WAIVER"` lets a job settle without the required photos. Each one names who, when and why, and `"action": "revoke"` ends it. Nothing bypasses the gate silently.
+
+**Daily check**
+
+`/api/cron/funding-reconcile` runs at 10:00 UTC (in `vercel.json`): it re-reads recent payments from Stripe, then alerts on crewed or started jobs that are not funded, payments stuck processing, settlements that do not balance, and checked-out work waiting past the review window. It flags; it never moves money.
+
+**Not built, by design or yet**
+
+Deferred collection for long-lead bookings (the spec proposed charging 24 hours before service) — cards are charged at booking. Bank (ACH) payments are off. Worker transfers need Stripe Connect enabled; photos and receipts need the storage bucket.
+
+## 14. Launch waitlist
+
+Added 29 October 2026 from the waitlist work order, on `feature/waitlist` off `main`. Additive migration `20261029120000_add_waitlist_signup`: one enum and one table, nothing existing changed. That migration is already applied to production; the junk and pay-before-dispatch migrations are not yet.
+
+**Where signups come from**
+
+- The coming-soon site on `tempmovers.com` (the static site, source folder `tempmovers-site`): the form on the home page and on `/junk-removal/`, posting to the site's own `/api/waitlist` function, which writes to the production `WaitlistSignup` table. The function reads `DATABASE_URL` from the Vercel **Production** environment.
+- The platform itself: `POST /api/waitlist`, the same contract, so nothing changes when the platform replaces the coming-soon page.
+
+Email is the only required field. Each visitor's address gets about five tries a minute, a hidden field catches bots, a repeat signup updates rather than duplicates, and one email may be on both the customer and worker lists. `utm_source`, `utm_medium` and `utm_campaign` on the link are kept in `source`.
+
+**Seeing the list**
+
+Admin → `/admin/waitlist`: totals (all, customers, workers), filters by list and ZIP, and **Export CSV** (`GET /api/admin/waitlist?format=csv`). The screen reads whichever database the platform is pointed at, so until the platform runs on production it will not show the live signups; export them from production with the same route once it does.
+
+**Privacy**
+
+The form links to `/privacy/`, a placeholder until the full policy is published. There is no email service on the domain yet, so the placeholder lists no contact address.
