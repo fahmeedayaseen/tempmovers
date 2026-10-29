@@ -178,6 +178,18 @@ async function applyFundingEvent(paymentIntentId: string, event: Stripe.Event) {
   }
   if (!ref) return;
 
+  // The display status follows Stripe's current state, so a late or
+  // out-of-order event handled above can never leave a paid booking showing
+  // "failed" (the gate itself never reads this field on a prepaid booking).
+  if (attempt && attempt.purpose === "INITIAL") {
+    const display = ({
+      COLLECTED: "CAPTURED", PARTIALLY_REFUNDED: "PARTIALLY_REFUNDED", REFUNDED: "REFUNDED", PROCESSING: "PROCESSING",
+      FAILED: "FAILED", CANCELED: "CANCELED", DISPUTED: "DISPUTED", RETURNED: "DISPUTED", ACTION_REQUIRED: "REQUIRES_PAYMENT_METHOD", UNPAID: "REQUIRES_PAYMENT_METHOD",
+    } as const)[attempt.state];
+    if (ref.type === "JOB") await prisma.job.updateMany({ where: { id: ref.id, stripePaymentIntentId: paymentIntentId }, data: { paymentStatus: display } });
+    if (ref.type === "LOAD") await prisma.carrierRoute.updateMany({ where: { id: ref.id, stripePaymentIntentId: paymentIntentId }, data: { paymentStatus: display } });
+  }
+
   if (ref.type === "JOB" && (event.type === "payment_intent.succeeded" || event.type === "charge.succeeded")) {
     const evaluation = await evaluateFunding(ref);
     if (evaluation.funded) {
