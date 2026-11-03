@@ -163,7 +163,7 @@ export async function POST(request: Request) {
           surchargesCents: quote.surchargesCents,
           takeRatePercent: Math.round(plan.platformFeeBps / 100),
           platformTakeCents: plan.platformFeeCents,
-          crewPoolCents: plan.subtotalCents - plan.platformFeeCents,
+          crewPoolCents: plan.allInCents - plan.platformFeeCents,
           helpersRequired: quote.helpersRequired,
           // Helpers are paid hourly now, not a share; these are the planned amounts.
           helperSharePercent: 0,

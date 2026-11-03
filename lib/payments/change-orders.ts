@@ -10,12 +10,12 @@ import { marketCodeForJob } from "@/lib/payments/policy";
 // ---------------------------------------------------------------------------
 // Change orders — VASRUE Digital Media, 29 October 2026.
 //
-// Payment spec §3 and §6: extra hours, an extra helper, extra items, or
-// disposal over the allowance are priced on the server as a versioned change
-// order, shown to the customer with the incremental total and breakdown, and
-// collected BEFORE the added work. Junk deltas follow the allocation rules:
-// added helper pay is grossed up so the hauler is never docked, and a
-// disposal overage adds to the set-aside with no platform cut.
+// Extra hours, an extra helper (up to 10), or extra items are priced on the
+// server as a versioned change order, shown to the customer with the
+// incremental total, and collected BEFORE the added work. Added helper pay is
+// grossed up so the hauler is never docked. Model B: there is NO disposal
+// change order — disposal is internal to the flat price (DISPOSAL_OVERAGE is
+// blocked), and the 30% fee always applies to the full price.
 // ---------------------------------------------------------------------------
 
 export class ChangeOrderError extends Error {
@@ -26,6 +26,7 @@ export const changeOrderRequestSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("EXTRA_HOURS"), hours: z.number().min(0.25).max(12), reason: z.string().trim().min(3).max(500) }),
   z.object({ kind: z.literal("EXTRA_HELPER"), hours: z.number().min(0.25).max(12), reason: z.string().trim().min(3).max(500) }),
   z.object({ kind: z.literal("EXTRA_ITEMS"), items: z.array(z.object({ code: z.enum(JUNK_ITEM_CODES), quantity: z.number().int().min(1).max(20) })).min(1).max(JUNK_ITEM_CODES.length), reason: z.string().trim().min(3).max(500) }),
+  // Kept for compatibility, but Model B BLOCKS this server-side: disposal is internal, never billed to the customer. (UI "Dump will cost more" option should be removed as a follow-up.)
   z.object({ kind: z.literal("DISPOSAL_OVERAGE"), expectedDisposalCents: z.number().int().min(1).max(1_000_000), reason: z.string().trim().min(3).max(500) }),
   z.object({ kind: z.literal("OTHER"), amountCents: z.number().int().min(100).max(1_000_000), reason: z.string().trim().min(3).max(500) }),
 ]);
@@ -90,7 +91,7 @@ export async function priceChangeOrder(job: Pick<Job, "id" | "type" | "marketId"
   }
 
   if (req.kind === "EXTRA_HELPER") {
-    if (plan.helperCount >= 2) throw new ChangeOrderError("This job already has two helpers.");
+    if (plan.helperCount >= 10) throw new ChangeOrderError("This job already has the maximum of 10 helpers.");
     const payable = helperPayableMinutes(Math.round(req.hours * 60), policy);
     const helperComp = helperCompCents(payable, policy);
     const delta = grossUpCents(helperComp, plan.platformFeeBps);
@@ -109,15 +110,10 @@ export async function priceChangeOrder(job: Pick<Job, "id" | "type" | "marketId"
     return { deltaCents: delta, lines, plan: { allInDeltaCents: delta, disposalDeltaCents: 0, helperCompDeltaCents: 0, items: req.items } };
   }
 
-  // DISPOSAL_OVERAGE: collected before the dump, no platform cut (spec §6).
-  const allowance = await fundedDisposalAllowance(job.id, plan);
-  const delta = req.expectedDisposalCents - allowance;
-  if (delta <= 0) throw new ChangeOrderError(`The disposal allowance already covers that (allowance ${(allowance / 100).toFixed(2)}).`);
-  return {
-    deltaCents: delta,
-    lines: [{ label: `Disposal over the estimate (expected ${(req.expectedDisposalCents / 100).toFixed(2)}, allowance ${(allowance / 100).toFixed(2)})`, cents: delta }],
-    plan: { allInDeltaCents: delta, disposalDeltaCents: delta, helperCompDeltaCents: 0, expectedDisposalCents: req.expectedDisposalCents, allowanceBeforeCents: allowance },
-  };
+  // DISPOSAL_OVERAGE — Model B blocks this: the flat price is all-inclusive and
+  // disposal is internal, so a higher dump cost is the hauler's expense, not a
+  // customer charge. (Kept only so the type is exhaustive.)
+  throw new ChangeOrderError("Disposal is included in the flat all-inclusive price and can't be billed to the customer as a change order under Model B.");
 }
 
 export async function nextChangeOrderVersion(jobId: string, client: Prisma.TransactionClient | typeof prisma = prisma) {

@@ -10,9 +10,10 @@ import { PAY_STATUS_LABELS, payStatus } from "@/lib/payments/pay-status";
  *
  * GET /api/jobs/[jobId]/ledger (payment spec §8, portals and controls).
  *   Customer: what was collected and when, the scope, change orders,
- *             receipts and refunds, and the disposal set-aside on junk.
- *   Worker:   their own pay basis, hours, reimbursement rule and payment
- *             status only. Never another worker's pay or private data.
+ *             receipts and refunds. One flat price on junk — no disposal line.
+ *   Worker:   their own pay basis, hours and payment status only. Never
+ *             another worker's pay or private data.
+ *   (Model B: disposal is internal; shown only to ADMIN for margin.)
  *   Admin:    use /api/admin/funding for the full ledger.
  * No card details or storage keys are ever returned.
  */
@@ -49,7 +50,8 @@ export async function GET(request: Request, context: { params: Promise<{ jobId: 
       changeOrders: changeOrders.map((c) => ({ id: c.id, version: c.version, kind: c.kind, status: c.status, deltaCents: c.deltaCents, lines: c.lines, reason: c.reason, paidAt: c.paidAt })),
       receipts: transactions.map((t) => ({ amountCents: t.amountReceivedCents, brand: t.paymentMethodBrand, last4: t.paymentMethodLast4, receiptUrl: t.receiptUrl, at: t.createdAt })),
       refunds: transactions.flatMap((t) => t.refunds.map((r) => ({ amountCents: r.amountCents, status: r.status, reason: r.reason, at: r.createdAt }))),
-      disposal: disposal ? { estimatedCents: disposal.estimatedCents, actualCents: disposal.state === "APPROVED" ? disposal.actualCents : null, status: disposal.state, rule: "Set aside from your total for the dump. If it costs less, the difference is refunded to you in full; if it will cost more, you're asked to approve and pay it first." } : null,
+      // Model B: ADMIN sees the internal disposal figures for margin; the CUSTOMER never does (it is included in the one flat price).
+      disposal: authed.role === "ADMIN" && disposal ? { estimatedCents: disposal.estimatedCents, actualCents: disposal.state === "APPROVED" ? disposal.actualCents : null, status: disposal.state, rule: "Internal disposal estimate/actual for margin only — not a customer line, not reimbursed, not refunded." } : null,
     });
   }
 
@@ -64,12 +66,11 @@ export async function GET(request: Request, context: { params: Promise<{ jobId: 
   if (isJunkPlan && seat.junkCrewRole === "HELPER") {
     basis = { rule: "Paid hourly for your time on the job, from check-in to release", hourlyCents: plan.helperHourlyCents, minimumHours: plan.helperMinimumMinutes / 60, incrementMinutes: plan.helperIncrementMinutes, plannedHours: (plan.helperMinutes[0] ?? 0) / 60, estimatedCents: plan.helperCompCents[0] ?? 0 };
   } else if (isJunkPlan && seat.junkCrewRole === "HAULER") {
-    const disposal = await prisma.disposalExpense.findUnique({ where: { jobId } });
-    const reimbursement = await prisma.paymentAllocation.findFirst({ where: { entityType: "JOB", entityId: jobId, recipient: "DISPOSAL" } });
     basis = {
-      rule: "Service earnings: the job's service price after disposal, less the 30% platform fee and the helpers' hourly pay. Fuel, insurance and the truck come out of this.",
+      // Model B: the hauler earns the residual of the FULL price after the 30% fee
+      // and helper pay, and covers disposal, fuel, insurance and the truck from it.
+      rule: "Your earnings: the full service price, less the 30% platform fee and the helpers' hourly pay. You cover disposal, fuel, insurance and the truck out of this.",
       estimatedServiceCents: plan.haulerServiceCents,
-      disposal: { allowanceCents: disposal?.estimatedCents ?? plan.disposalCents, submittedCents: disposal?.actualCents ?? null, status: disposal?.state ?? "ESTIMATED", reimbursementStatus: reimbursement?.state ?? "ESTIMATED", rule: "Reimbursed separately against the dump receipt, up to the funded allowance." },
     };
   } else {
     basis = { rule: "Paid per approved hour", rateCents: seat.agreedEarningsCents, minimumHours: job.minimumHours };
