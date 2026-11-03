@@ -277,7 +277,7 @@ export type JunkSettlementInput = {
   /** Actual documented disposal cost from the receipt — ADMIN/MARGIN REPORTING ONLY. Never changes any payout or refund (Model B). */
   actualDisposalCents?: number | null;
   bookingProtectionCents: number;
-  policy: Pick<JunkAllocationPolicy, "platformFeeBps" | "helperHourlyCents" | "helperMinimumMinutes" | "helperIncrementMinutes">;
+  policy: Pick<JunkAllocationPolicy, "platformFeeBps" | "helperHourlyCents" | "helperMinimumMinutes" | "helperIncrementMinutes" | "haulerFloorCents">;
 };
 
 export type JunkSettlement = {
@@ -319,46 +319,32 @@ export function settleJunk(input: JunkSettlementInput): JunkSettlement {
   const helperTotalCents = comp.reduce((a, b) => a + b, 0);
 
   const platformFeeCents = junkPlatformFeeCents(input.fundedAllInCents, policy.platformFeeBps); // FULL price
-  let haulerServiceCents = input.fundedAllInCents - platformFeeCents - helperTotalCents;
-  let haulerShortfallCents = 0;
+  const haulerServiceCents = input.fundedAllInCents - platformFeeCents - helperTotalCents;
 
-  if (haulerServiceCents < 0) {
-    haulerShortfallCents = -haulerServiceCents;
-    haulerServiceCents = 0;
-
-    // BLOCKER fix (review §4): if the shortfall exceeds the platform fee, even
-    // taking the whole fee can't pay the helpers — the booking is underfunded.
-    // Do NOT emit a negative payout row. Hold the release, record the unfunded
-    // obligation, and require funding/liability resolution before retry.
-    if (haulerShortfallCents > platformFeeCents) {
-      const unfundedObligationCents = helperTotalCents - input.fundedAllInCents;
-      exceptions.push(
-        `Underfunded booking: actual helper pay (${helperTotalCents}¢) exceeds the full funded price (${input.fundedAllInCents}¢). ` +
-          `Release HELD — no rows emitted. Fund the ${unfundedObligationCents}¢ shortfall via a change order or the documented exception policy before payout.`,
-      );
-      return {
-        collectedCents,
-        helperPayableMinutes: payable,
-        helperCompCents: comp,
-        helperTotalCents,
-        platformFeeCents,
-        haulerServiceCents: 0,
-        haulerShortfallCents,
-        platformNetCents: 0,
-        requiresHold: true,
-        unfundedObligationCents,
-        actualDisposalCents: input.actualDisposalCents ?? null,
-        exceptions,
-        rows: [],
-      };
-    }
-
-    // Shortfall fits inside the fee: the platform absorbs it (non-negative), the
-    // hauler is held at zero. Settles, but flagged for review.
-    exceptions.push(`Hauler earnings would go negative by ${haulerShortfallCents}¢ (actual helper time exceeded what the price supports); held at zero and absorbed from the platform fee pending review.`);
+  // C3/C4 + BLOCKER (patch-0002 review): the hauler must clear its approved
+  // minimum. If actual helper pay pushes the residual below the floor (or
+  // negative), HOLD for review — never auto-release a sub-minimum or negative
+  // payout, and never silently redirect legally-owed helper pay to the hauler.
+  // The durable HOLD record and the authorized release decision live in the
+  // settlement layer; this function refuses to produce release rows.
+  if (haulerServiceCents < policy.haulerFloorCents) {
+    const underfunded = helperTotalCents > input.fundedAllInCents;
+    const unfundedObligationCents = underfunded ? helperTotalCents - input.fundedAllInCents : 0;
+    exceptions.push(
+      underfunded
+        ? `Underfunded booking: actual helper pay (${helperTotalCents}¢) exceeds the full funded price (${input.fundedAllInCents}¢). Release HELD; fund the ${unfundedObligationCents}¢ shortfall (change order / exception) before payout.`
+        : `Hauler residual (${haulerServiceCents}¢) is below the approved minimum (${policy.haulerFloorCents}¢) after actual helper time. Release HELD for review; do not auto-pay the hauler below the floor.`,
+    );
+    return {
+      collectedCents, helperPayableMinutes: payable, helperCompCents: comp, helperTotalCents,
+      platformFeeCents, haulerServiceCents: Math.max(0, haulerServiceCents),
+      haulerShortfallCents: haulerServiceCents < 0 ? -haulerServiceCents : 0,
+      platformNetCents: 0, requiresHold: true, unfundedObligationCents,
+      actualDisposalCents: input.actualDisposalCents ?? null, exceptions, rows: [],
+    };
   }
 
-  const platformNetCents = platformFeeCents - haulerShortfallCents; // guaranteed >= 0 here
+  const platformNetCents = platformFeeCents; // hauler clears the floor; full fee retained
 
   const rows: JunkSettlement["rows"] = [
     { recipient: "PLATFORM", amountCents: platformNetCents },
@@ -380,7 +366,7 @@ export function settleJunk(input: JunkSettlementInput): JunkSettlement {
     helperTotalCents,
     platformFeeCents,
     haulerServiceCents,
-    haulerShortfallCents,
+    haulerShortfallCents: 0,
     platformNetCents,
     requiresHold: false,
     unfundedObligationCents: 0,
@@ -460,7 +446,7 @@ export function settleJunkCrew(input: {
   attendance: CrewAttendance[];
   requiredHelperCount: number;
   actualDisposalCents?: number | null;
-  policy: Pick<JunkAllocationPolicy, "platformFeeBps" | "helperHourlyCents" | "helperMinimumMinutes" | "helperIncrementMinutes">;
+  policy: Pick<JunkAllocationPolicy, "platformFeeBps" | "helperHourlyCents" | "helperMinimumMinutes" | "helperIncrementMinutes" | "haulerFloorCents">;
 }): CrewSettlement {
   const { policy } = input;
   assertCents("funded all-in", input.fundedAllInCents);
@@ -497,6 +483,17 @@ export function settleJunkCrew(input: {
     };
   };
 
+  // C2/§6: untrusted attendance HOLDS, it never throws. Reject duplicate slot
+  // records, records for an unknown slot, and invalid minutes before paying.
+  const seenSlots = new Set<number>();
+  for (const a of input.attendance) {
+    if (!Number.isInteger(a.slotIndex) || a.slotIndex < 0 || a.slotIndex >= input.committedCrew.length)
+      return mkHold(`Attendance refers to an unknown crew slot (${a.slotIndex}); settlement HELD.`);
+    if (seenSlots.has(a.slotIndex)) return mkHold(`Duplicate attendance record for slot ${a.slotIndex}; settlement HELD pending a single trusted record.`);
+    seenSlots.add(a.slotIndex);
+    if (!Number.isInteger(a.actualMinutes) || a.actualMinutes < 0) return mkHold(`Invalid attendance minutes for slot ${a.slotIndex}; settlement HELD.`);
+  }
+
   if (unfilledCommitted > 0 || belowSafetyMin) {
     return mkHold(
       `Crew mismatch: ${verifiedHelperCount} of ${input.committedCrew.length} committed helpers supplied & verified; safety minimum is ${input.requiredHelperCount}. ` +
@@ -512,20 +509,18 @@ export function settleJunkCrew(input: {
   });
   const helperPaidCents = helperRows.reduce((a, r) => a + r.amountCents, 0);
 
-  let haulerServiceCents = input.fundedAllInCents - platformFeeCents - helperPaidCents;
-  let haulerShortfallCents = 0;
-  if (haulerServiceCents < 0) {
-    haulerShortfallCents = -haulerServiceCents;
-    haulerServiceCents = 0;
-    if (haulerShortfallCents > platformFeeCents) {
-      return mkHold(
-        `Underfunded: actual helper pay (${helperPaidCents}¢) exceeds the full funded price (${input.fundedAllInCents}¢). Release HELD; fund the shortfall via change order before payout.`,
-        helperPaidCents - input.fundedAllInCents,
-      );
-    }
-    exceptions.push(`Hauler earnings held at zero; ${haulerShortfallCents}¢ overrun absorbed from the platform fee pending review.`);
+  const haulerServiceCents = input.fundedAllInCents - platformFeeCents - helperPaidCents;
+  // C4: the hauler must clear its approved minimum; below the floor (or negative) HOLDS for review.
+  if (haulerServiceCents < policy.haulerFloorCents) {
+    const underfunded = helperPaidCents > input.fundedAllInCents;
+    return mkHold(
+      underfunded
+        ? `Underfunded: actual helper pay (${helperPaidCents}¢) exceeds the full funded price (${input.fundedAllInCents}¢). Release HELD; fund the shortfall via change order before payout.`
+        : `Hauler residual (${haulerServiceCents}¢) is below the approved minimum (${policy.haulerFloorCents}¢). Release HELD for review; do not auto-pay below the floor.`,
+      underfunded ? helperPaidCents - input.fundedAllInCents : 0,
+    );
   }
-  const platformNetCents = platformFeeCents - haulerShortfallCents;
+  const platformNetCents = platformFeeCents;
 
   const rows: CrewSettlementRow[] = [
     { recipient: "PLATFORM", amountCents: platformNetCents },
@@ -543,7 +538,7 @@ export function settleJunkCrew(input: {
 
   return {
     collectedCents, mode, requiredHelperCount: input.requiredHelperCount, verifiedHelperCount,
-    platformFeeCents, helperPaidCents, haulerServiceCents, haulerShortfallCents, platformNetCents,
+    platformFeeCents, helperPaidCents, haulerServiceCents, haulerShortfallCents: 0, platformNetCents,
     requiresHold: false, unfundedObligationCents: 0, withheldForUnsuppliedCrewCents: 0,
     actualDisposalCents: input.actualDisposalCents ?? null, exceptions, rows,
   };

@@ -131,7 +131,7 @@ export async function settleJob(jobId: string, actorUserId: string): Promise<Set
       actualHelperMinutes: helpers.map((h) => Math.round(Number(h.actualHours ?? 0) * 60)),
       actualDisposalCents,
       bookingProtectionCents: plan.bookingProtectionCents,
-      policy: { platformFeeBps: plan.platformFeeBps, helperHourlyCents: plan.helperHourlyCents, helperMinimumMinutes: plan.helperMinimumMinutes, helperIncrementMinutes: plan.helperIncrementMinutes },
+      policy: { platformFeeBps: plan.platformFeeBps, helperHourlyCents: plan.helperHourlyCents, helperMinimumMinutes: plan.helperMinimumMinutes, helperIncrementMinutes: plan.helperIncrementMinutes, haulerFloorCents: plan.haulerFloorCents },
     });
     // BLOCKER (review §4): an underfunded job is HELD, never settled with a negative row.
     if (result.requiresHold) {

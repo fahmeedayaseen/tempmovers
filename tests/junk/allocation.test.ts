@@ -141,14 +141,12 @@ describe("settlement at completion (Model B: no disposal reimbursement, no routi
     expect(sum(s)).toBe(10895);
   });
 
-  it("small overrun: the platform absorbs it, the hauler holds at zero, no negative row", () => {
+  it("C4 — hauler below the approved minimum (overtime overrun): HOLD for review, no sub-minimum auto-pay", () => {
+    // $200 funded, 300-min helper = $150: hauler would be 20000−6000−15000 = −1000 < floor.
     const s = settleJunk({ ...base, fundedAllInCents: 20000, actualHelperMinutes: [300] });
-    expect(s.requiresHold).toBe(false);
-    expect(s.haulerServiceCents).toBe(0);
-    expect(s.platformNetCents).toBe(5000); // 6000 fee − 1000 shortfall
-    expect(s.rows.every((r) => r.amountCents >= 0)).toBe(true);
-    expect(sum(s)).toBe(20995);
-    expect(s.exceptions.length).toBeGreaterThan(0);
+    expect(s.requiresHold).toBe(true);
+    expect(s.rows.length).toBe(0);
+    expect(s.platformNetCents).toBe(0);
   });
 
   it("underfunded: HOLD, no rows released, obligation recorded, no negative platform row", () => {
@@ -159,7 +157,7 @@ describe("settlement at completion (Model B: no disposal reimbursement, no routi
     expect(s.unfundedObligationCents).toBe(11000);
   });
 
-  it("always balances to the collected amount, or holds — never a negative row", () => {
+  it("always balances to the collected amount, or holds — never a negative row, never below the floor", () => {
     for (let i = 0; i < 400; i++) {
       const allIn = 2000 + ((i * 7919) % 120000);
       const helpers = i % 4;
@@ -167,7 +165,10 @@ describe("settlement at completion (Model B: no disposal reimbursement, no routi
       const s = settleJunk({ fundedAllInCents: allIn, actualHelperMinutes: actual, actualDisposalCents: (i * 97) % 20000, bookingProtectionCents: 995, policy });
       expect(s.rows.every((r) => r.amountCents >= 0)).toBe(true);
       if (s.requiresHold) expect(s.rows.length).toBe(0);
-      else expect(sum(s)).toBe(allIn + 995);
+      else {
+        expect(sum(s)).toBe(allIn + 995);
+        expect(s.haulerServiceCents).toBeGreaterThanOrEqual(policy.haulerFloorCents); // never settles below the floor
+      }
     }
   });
 });
@@ -200,6 +201,23 @@ describe("crew fulfillment routing (PLATFORM / OWN / HYBRID)", () => {
     expect(s.rows.length).toBe(0);
     expect(s.haulerServiceCents).toBe(0);
     expect(s.withheldForUnsuppliedCrewCents).toBe(0);
+  });
+
+  it("duplicate / unknown attendance records hold, they do not throw", () => {
+    const dup = settleJunkCrew({
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2,
+      committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }, { source: "PLATFORM", payeeId: "wkr_B", requiredBySafety: true }],
+      attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }],
+      policy,
+    });
+    expect(dup.requiresHold).toBe(true);
+    const unknown = settleJunkCrew({
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 1,
+      committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }],
+      attendance: [{ slotIndex: 5, attended: true, verified: true, actualMinutes: 120 }],
+      policy,
+    });
+    expect(unknown.requiresHold).toBe(true);
   });
 
   it("a verified slot with no approved payee holds (no post-funding payee swap)", () => {
