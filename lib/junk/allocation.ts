@@ -427,6 +427,21 @@ export type CrewSettlementRow =
   | { recipient: "PLATFORM" | "PROTECTION" | "HAULER"; amountCents: number }
   | { recipient: "HELPER"; amountCents: number; slotIndex: number; source: CrewSource; payeeId: string };
 
+/**
+ * An ACTUAL transfer to a single recipient — the thing the payout layer moves.
+ * The hauler business transfer is its service residual PLUS its own-crew helper
+ * allocations (the hauler then pays its own workers); it is NOT just the service
+ * residual. Platform-supplied workers are paid separately, each to their own
+ * account. Transfers always reconcile to the collected customer payment.
+ */
+export type CrewTransfer = {
+  recipient: "PLATFORM" | "PROTECTION" | "HAULER_BUSINESS" | "WORKER";
+  payeeId: string | null;
+  amountCents: number;
+  /** For the hauler business: how the transfer splits (service vs own-crew helper pay). */
+  parts?: { serviceCents: number; ownCrewHelperCents: number };
+};
+
 export type CrewSettlement = {
   collectedCents: number;
   mode: "PLATFORM" | "OWN" | "HYBRID";
@@ -434,6 +449,7 @@ export type CrewSettlement = {
   verifiedHelperCount: number;
   platformFeeCents: number;
   helperPaidCents: number;
+  /** INTERNAL service residual only (price − fee − all helper comp). NOT the hauler's transfer — see `transfers`. */
   haulerServiceCents: number;
   haulerShortfallCents: number;
   platformNetCents: number;
@@ -443,7 +459,10 @@ export type CrewSettlement = {
   withheldForUnsuppliedCrewCents: number;
   actualDisposalCents: number | null;
   exceptions: string[];
+  /** Per-slot allocation rows (audit). */
   rows: CrewSettlementRow[];
+  /** Aggregated actual transfers by recipient; reconcile to collectedCents. Empty when held. */
+  transfers: CrewTransfer[];
 };
 
 export function settleJunkCrew(input: {
@@ -452,6 +471,8 @@ export function settleJunkCrew(input: {
   committedCrew: CommittedCrewSlot[];
   attendance: CrewAttendance[];
   requiredHelperCount: number;
+  /** The hauler business's approved payout recipient — receives the service residual plus its own-crew helper allocations. */
+  haulerPayeeId: string;
   actualDisposalCents?: number | null;
   policy: Pick<JunkAllocationPolicy, "platformFeeBps" | "helperHourlyCents" | "helperMinimumMinutes" | "helperIncrementMinutes" | "haulerFloorCents">;
 }): CrewSettlement {
@@ -486,7 +507,7 @@ export function settleJunkCrew(input: {
       platformFeeCents, helperPaidCents: 0, haulerServiceCents: 0, haulerShortfallCents: 0,
       platformNetCents: 0, requiresHold: true, unfundedObligationCents: unfunded,
       withheldForUnsuppliedCrewCents: 0, actualDisposalCents: input.actualDisposalCents ?? null,
-      exceptions, rows: [],
+      exceptions, rows: [], transfers: [],
     };
   };
 
@@ -543,10 +564,35 @@ export function settleJunkCrew(input: {
   const sum = rows.reduce((a, r) => a + r.amountCents, 0);
   if (sum !== collectedCents) throw new JunkAllocationError(`Crew settlement does not balance: ${sum} vs ${collectedCents}.`);
 
+  // ACTUAL transfers (what the payout layer moves). The hauler BUSINESS receives
+  // the service residual PLUS its own-crew helper allocations — it then pays its
+  // own workers. Platform-supplied helpers are paid separately, each to its own
+  // account. The $364.32 service residual is NOT the hauler's transfer.
+  const ownCrewHelperCents = helperRows
+    .filter((r) => r.recipient === "HELPER" && (r as { source: CrewSource }).source === "OWN")
+    .reduce((a, r) => a + r.amountCents, 0);
+  const transfers: CrewTransfer[] = [
+    { recipient: "PLATFORM", payeeId: null, amountCents: platformNetCents },
+    ...(input.bookingProtectionCents > 0 ? [{ recipient: "PROTECTION" as const, payeeId: null, amountCents: input.bookingProtectionCents }] : []),
+    { recipient: "HAULER_BUSINESS", payeeId: input.haulerPayeeId, amountCents: haulerServiceCents + ownCrewHelperCents, parts: { serviceCents: haulerServiceCents, ownCrewHelperCents } },
+  ];
+  // Each platform-supplied worker is a separate transfer, grouped by payee.
+  const workerTotals = new Map<string, number>();
+  for (const r of helperRows) {
+    if (r.recipient !== "HELPER" || (r as { source: CrewSource }).source !== "PLATFORM") continue;
+    const id = (r as { payeeId: string }).payeeId;
+    workerTotals.set(id, (workerTotals.get(id) ?? 0) + r.amountCents);
+  }
+  for (const [payeeId, amountCents] of workerTotals) transfers.push({ recipient: "WORKER", payeeId, amountCents });
+
+  // Reconcile: every cent of the customer payment is accounted for, once.
+  const transferred = transfers.reduce((a, t) => a + t.amountCents, 0);
+  if (transferred !== collectedCents) throw new JunkAllocationError(`Crew transfers do not reconcile: ${transferred} vs ${collectedCents} collected.`);
+
   return {
     collectedCents, mode, requiredHelperCount: input.requiredHelperCount, verifiedHelperCount,
     platformFeeCents, helperPaidCents, haulerServiceCents, haulerShortfallCents: 0, platformNetCents,
     requiresHold: false, unfundedObligationCents: 0, withheldForUnsuppliedCrewCents: 0,
-    actualDisposalCents: input.actualDisposalCents ?? null, exceptions, rows,
+    actualDisposalCents: input.actualDisposalCents ?? null, exceptions, rows, transfers,
   };
 }

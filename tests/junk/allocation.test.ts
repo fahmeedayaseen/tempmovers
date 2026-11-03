@@ -197,45 +197,70 @@ describe("settlement at completion (Model B: no disposal reimbursement, no routi
 });
 
 describe("crew fulfillment routing (PLATFORM / OWN / HYBRID)", () => {
-  it("hybrid: each verified helper paid once to its own payee; hauler residual unchanged by crew source", () => {
+  it("worked example: 2 hauler + 2 TM helpers @3h → hauler business gets $544.32 (service + own crew), TM workers $180, reconciled", () => {
+    // Funded at the 4-helper price from the pricing handoff ($1,034.74).
     const s = settleJunkCrew({
-      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2,
-      committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }, { source: "OWN", payeeId: "crew_B", requiredBySafety: true }],
+      fundedAllInCents: 103474, bookingProtectionCents: 0, requiredHelperCount: 4, haulerPayeeId: "hauler_biz",
+      committedCrew: [
+        { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true },
+        { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true },
+        { source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true },
+        { source: "PLATFORM", payeeId: "wkr_B", requiredBySafety: true },
+      ],
+      attendance: [0, 1, 2, 3].map((i) => ({ slotIndex: i, attended: true, verified: true, actualMinutes: 180 })),
+      policy,
+    });
+    expect(s.requiresHold).toBe(false);
+    expect(s.platformNetCents).toBe(31042); // $310.42
+    expect(s.haulerServiceCents).toBe(36432); // internal service residual, NOT the hauler transfer
+    const hauler = s.transfers.find((t) => t.recipient === "HAULER_BUSINESS")!;
+    expect(hauler.amountCents).toBe(54432); // $544.32 = service $364.32 + own-crew 2 × $90
+    expect(hauler.parts).toEqual({ serviceCents: 36432, ownCrewHelperCents: 18000 });
+    const workers = s.transfers.filter((t) => t.recipient === "WORKER");
+    expect(workers.reduce((a, t) => a + t.amountCents, 0)).toBe(18000); // 2 TM helpers × $90, paid separately
+    expect(s.transfers.reduce((a, t) => a + t.amountCents, 0)).toBe(103474); // reconciles to the customer payment
+  });
+
+  it("hybrid: each verified helper paid once to its own payee; hauler business = service + own crew", () => {
+    const s = settleJunkCrew({
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2, haulerPayeeId: "hauler_biz",
+      committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }, { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true }],
       attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 1, attended: true, verified: true, actualMinutes: 120 }],
       policy,
     });
     expect(s.requiresHold).toBe(false);
     expect(s.mode).toBe("HYBRID");
-    const helperRows = s.rows.filter((r) => r.recipient === "HELPER") as Array<{ amountCents: number; payeeId: string }>;
-    expect(helperRows.map((r) => r.payeeId).sort()).toEqual(["crew_B", "wkr_A"]);
-    expect(helperRows.every((r) => r.amountCents === 6000)).toBe(true);
-    expect(s.haulerServiceCents).toBe(14000);
-    expect(s.rows.reduce((a, r) => a + r.amountCents, 0)).toBe(37143);
+    expect(s.haulerServiceCents).toBe(14000); // internal residual
+    const hauler = s.transfers.find((t) => t.recipient === "HAULER_BUSINESS")!;
+    expect(hauler.amountCents).toBe(20000); // $140 service + $60 own helper
+    expect(s.transfers.filter((t) => t.recipient === "WORKER").reduce((a, t) => a + t.amountCents, 0)).toBe(6000); // the one TM helper
+    expect(s.transfers.reduce((a, t) => a + t.amountCents, 0)).toBe(37143);
   });
 
   it("hauler arrives short of the committed/safety crew: HOLD, and the missing helper's pay is never redirected to the hauler", () => {
     const s = settleJunkCrew({
-      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2,
-      committedCrew: [{ source: "OWN", payeeId: "h1", requiredBySafety: true }, { source: "OWN", payeeId: "h2", requiredBySafety: true }],
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2, haulerPayeeId: "hauler_biz",
+      committedCrew: [{ source: "OWN", payeeId: "hauler_biz", requiredBySafety: true }, { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true }],
       attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 1, attended: false, verified: false, actualMinutes: 0 }],
       policy,
     });
     expect(s.requiresHold).toBe(true);
     expect(s.rows.length).toBe(0);
+    expect(s.transfers.length).toBe(0);
     expect(s.haulerServiceCents).toBe(0);
     expect(s.withheldForUnsuppliedCrewCents).toBe(0);
   });
 
   it("duplicate / unknown attendance records hold, they do not throw", () => {
     const dup = settleJunkCrew({
-      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2,
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2, haulerPayeeId: "hauler_biz",
       committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }, { source: "PLATFORM", payeeId: "wkr_B", requiredBySafety: true }],
       attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }],
       policy,
     });
     expect(dup.requiresHold).toBe(true);
     const unknown = settleJunkCrew({
-      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 1,
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 1, haulerPayeeId: "hauler_biz",
       committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }],
       attendance: [{ slotIndex: 5, attended: true, verified: true, actualMinutes: 120 }],
       policy,
@@ -245,8 +270,8 @@ describe("crew fulfillment routing (PLATFORM / OWN / HYBRID)", () => {
 
   it("a verified slot with no approved payee holds (no post-funding payee swap)", () => {
     const s = settleJunkCrew({
-      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2,
-      committedCrew: [{ source: "OWN", payeeId: null, requiredBySafety: true }, { source: "OWN", payeeId: "h2", requiredBySafety: true }],
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2, haulerPayeeId: "hauler_biz",
+      committedCrew: [{ source: "OWN", payeeId: null, requiredBySafety: true }, { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true }],
       attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 1, attended: true, verified: true, actualMinutes: 120 }],
       policy,
     });
