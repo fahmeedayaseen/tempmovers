@@ -53,7 +53,10 @@ export const DEFAULT_JUNK_ALLOCATION_POLICY: JunkAllocationPolicy = {
   haulerFloorCents: 4000,
   truckAllowanceCents: 1000,
   maxHelpers: 10,
-  includedHelperCount: 0,
+  // Owner decision (2 Nov): the base junk price includes the hauler AND one
+  // helper. Only helpers beyond the first are billed (grossed up) to the
+  // customer — additional billable = max(0, total helpers − 1).
+  includedHelperCount: 1,
   disposalEstimatesCents: { SINGLE_ITEM: 1500, EIGHTH: 2500, QUARTER: 4000, HALF: 8000, THREE_QUARTER: 10500, FULL: 13500 },
   disposalAddersCents: { MATTRESS: 2500, TIRES: 1000, LARGE_APPLIANCE: 1500, EWASTE: 1000, PIANO: 0, HOT_TUB: 0, FREON_APPLIANCE: 2000 },
 };
@@ -224,12 +227,16 @@ export function quoteJunkAllocation(input: {
 
   let allIn = input.basePriceCents;
 
-  // Helpers beyond includedHelperCount are grossed into the price so the
-  // hauler's share is never reduced by adding helpers (handoff §2, no doubling).
+  // Every helper beyond the included one is billed to the customer at the
+  // per-helper-hour rate (crew-pricing handoff 2 Nov): the worker hourly rate
+  // grossed up for the platform fee, rounded UP to cents, then × payable hours.
+  // additional billable helpers = max(0, total − includedHelperCount).
   const included = Math.max(0, Math.min(crew.helperCount, policy.includedHelperCount));
-  const includedComp = helperComp.slice(0, included).reduce((a, b) => a + b, 0);
-  const extraComp = helperTotal - includedComp;
-  const helperGrossUpCents = grossUpCents(extraComp, policy.platformFeeBps);
+  const ratePerHelperHourCents = grossUpCents(policy.helperHourlyCents, policy.platformFeeBps); // $30 / 0.70 → $42.86
+  let helperGrossUpCents = 0;
+  for (let i = included; i < payable.length; i++) {
+    helperGrossUpCents += Math.ceil((ratePerHelperHourCents * payable[i]) / 60);
+  }
   if (helperGrossUpCents > 0) {
     allIn += helperGrossUpCents;
     lines.push({ label: "Additional helpers", cents: helperGrossUpCents });

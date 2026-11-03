@@ -13,6 +13,9 @@ import {
 
 const policy: JunkAllocationPolicy = DEFAULT_JUNK_ALLOCATION_POLICY;
 const noFloor: JunkAllocationPolicy = { ...policy, haulerFloorCents: 0, truckAllowanceCents: 0 };
+// The default base includes 1 helper (includedHelperCount: 1). This variant
+// bills every helper (base is hauler-only) — used for the item illustration.
+const allAdditional: JunkAllocationPolicy = { ...noFloor, includedHelperCount: 0 };
 
 describe("Model B allocation (fee on the full price, disposal internal)", () => {
   it("$649 full load: 30% of the FULL price = $194.70; hauler residual = $454.30; nothing added back for disposal", () => {
@@ -23,21 +26,41 @@ describe("Model B allocation (fee on the full price, disposal internal)", () => 
     expect(a.platformFeeCents + a.haulerServiceCents + a.helperTotalCents).toBe(64900);
   });
 
-  it("$200 item base, 2 helpers: all-in $371.43, fee $111.43, pool $120, hauler $140 (item-pricing handoff)", () => {
-    const q = quoteJunkAllocation({ basePriceCents: 20000, disposalEstimateCents: 0, bookingProtectionCents: 0, policy: noFloor, crew: planJunkCrew({ helperCount: 2, estimatedHours: 2 }, noFloor) });
-    expect(q.helperGrossUpCents).toBe(17143);
-    expect(q.allInCents).toBe(37143);
-    expect(q.platformFeeCents).toBe(11143);
-    expect(q.helperTotalCents).toBe(12000);
-    expect(q.haulerServiceCents).toBe(14000);
+  it("base includes 1 helper: 1 helper = base price, each extra billed at $42.86/helper-hour", () => {
+    const rate = grossUpCents(policy.helperHourlyCents, 3000); // $30 / 0.70 → $42.86
+    expect(rate).toBe(4286);
+    const one = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 10000, bookingProtectionCents: 0, policy, crew: planJunkCrew({ helperCount: 1, estimatedHours: 2 }, policy) });
+    expect(one.allInCents).toBe(64900); // first helper included, nothing added
+    const two = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 10000, bookingProtectionCents: 0, policy, crew: planJunkCrew({ helperCount: 2, estimatedHours: 2 }, policy) });
+    expect(two.helperGrossUpCents).toBe(8572); // 1 extra × 2h × $42.86
+    expect(two.allInCents).toBe(73472);
   });
 
-  it("adding helpers (0..10) never changes the hauler residual — the gross-up protects it", () => {
-    const base = 64900;
-    const residuals = [0, 1, 2, 10].map((n) =>
-      quoteJunkAllocation({ basePriceCents: base, disposalEstimateCents: 10000, bookingProtectionCents: 0, policy, crew: planJunkCrew({ helperCount: n, estimatedHours: 2 }, policy) }).haulerServiceCents,
-    );
-    for (const r of residuals) expect(r).toBe(45430);
+  it("worked example (crew-pricing handoff): 4 helpers × 3h → $1,034.74 total, $310.42 fee, $364.32 hauler service", () => {
+    const q = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 10000, bookingProtectionCents: 0, policy, crew: planJunkCrew({ helperCount: 4, estimatedHours: 3 }, policy) });
+    expect(q.helperGrossUpCents).toBe(38574); // 3 extra × 3h × $42.86
+    expect(q.allInCents).toBe(103474);
+    expect(q.platformFeeCents).toBe(31042); // 30% of the full total
+    expect(q.allInCents - q.platformFeeCents).toBe(72432); // 70% settlement pool
+    expect(q.helperTotalCents).toBe(36000); // 4 × 3h × $30 actual worker cost
+    expect(q.haulerServiceCents).toBe(36432); // hauler service residual (pool − all helper comp)
+  });
+
+  it("the hauler's base settlement is never reduced by adding helpers (1..10 ≥ base; 0 helpers = full residual)", () => {
+    const solo = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 10000, bookingProtectionCents: 0, policy, crew: planJunkCrew({ helperCount: 0, estimatedHours: 2 }, policy) });
+    expect(solo.haulerServiceCents).toBe(45430); // no helper to pay from the base
+    for (let n = 1; n <= 10; n++) {
+      const q = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 10000, bookingProtectionCents: 0, policy, crew: planJunkCrew({ helperCount: n, estimatedHours: 2 }, policy) });
+      expect(q.haulerServiceCents).toBeGreaterThanOrEqual(39430); // base settlement, never docked
+      expect(q.haulerServiceCents - 39430).toBeLessThanOrEqual(n); // only per-helper-hour rounding, in the hauler's favour
+    }
+  });
+
+  it("item base in all-additional mode (includedHelperCount: 0) bills both helpers", () => {
+    const q = quoteJunkAllocation({ basePriceCents: 20000, disposalEstimateCents: 0, bookingProtectionCents: 0, policy: allAdditional, crew: planJunkCrew({ helperCount: 2, estimatedHours: 2 }, allAdditional) });
+    expect(q.helperGrossUpCents).toBe(17144); // 2 helpers × 2h × $42.86
+    expect(q.allInCents).toBe(37144);
+    expect(q.helperTotalCents).toBe(12000);
   });
 });
 
@@ -107,7 +130,7 @@ describe("quotes", () => {
     const one = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 13500, bookingProtectionCents: 995, policy, crew: planJunkCrew({ helperCount: 1, estimatedHours: 5 }, policy) });
     const two = quoteJunkAllocation({ basePriceCents: 64900, disposalEstimateCents: 13500, bookingProtectionCents: 995, policy, crew: planJunkCrew({ helperCount: 2, estimatedHours: 5 }, policy) });
     expect(two.helperTotalCents).toBe(30000);
-    expect(two.helperGrossUpCents).toBe(grossUpCents(30000, 3000));
+    expect(two.helperGrossUpCents).toBe(Math.ceil((grossUpCents(3000, 3000) * 300) / 60)); // 1 extra helper × 5h at $42.86/hr
     expect(two.haulerServiceCents).toBeGreaterThanOrEqual(one.haulerServiceCents);
     expect(two.haulerServiceCents - one.haulerServiceCents).toBeLessThanOrEqual(1);
   });

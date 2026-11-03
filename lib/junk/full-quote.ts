@@ -81,18 +81,21 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
   const base = calculateJunkQuote(input);
   const disposalCents = estimateDisposalCents({ sizeRank: sizeRank(input), specialItems: input.specialItems }, policy);
   const crew = planJunkCrew({ helperCount: base.helpersRequired, estimatedHours: base.estimatedHours }, policy);
+  // Crew-pricing handoff (2 Nov): the single checkout price is base + extra
+  // helper-hour charges only. NOTHING is added on top — no mandatory booking
+  // protection, no disposal fee. So junk carries no protection add-on.
+  const bookingProtectionCents = 0;
   const allocation = quoteJunkAllocation({
     basePriceCents: base.allInCents,
     disposalEstimateCents: disposalCents,
     crew,
-    bookingProtectionCents: base.bookingProtectionFeeCents,
+    bookingProtectionCents,
     policy,
   });
 
-  // A3 (Model B, owner decision 2 Nov): the customer sees ONE all-inclusive
-  // price with booking protection FOLDED IN — no separate protection line — and
-  // the internal crew/helper/disposal split is never itemized to the customer
-  // (role privacy §6). The full breakdown lives in `plan` for admin/audit.
+  // The customer sees ONE all-inclusive price (= base + extra helper-hour
+  // charges); the internal crew/helper/disposal split is never itemized to the
+  // customer (role privacy §6). The full breakdown lives in `plan` for admin.
   const lines: JunkQuoteLine[] = [{ label: "All-inclusive junk removal", cents: allocation.totalCents }];
 
   const plan: JunkQuotePlan = {
@@ -119,7 +122,7 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     haulerTransferCents: allocation.haulerTransferCents,
     haulerFloorCents: policy.haulerFloorCents,
     truckAllowanceCents: policy.truckAllowanceCents,
-    bookingProtectionCents: base.bookingProtectionFeeCents,
+    bookingProtectionCents,
     totalCents: allocation.totalCents,
     repriced: allocation.repriced,
     policyApprovedByCarl: policy.carlApprovedAt !== null,
@@ -132,11 +135,11 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     allInCents: allocation.allInCents,
     helpersRequired: base.helpersRequired,
     crewSize: base.crewSize,
-    bookingProtectionFeeCents: base.bookingProtectionFeeCents,
+    bookingProtectionFeeCents: bookingProtectionCents,
     totalCents: allocation.totalCents,
     estimatedHours: base.estimatedHours,
     lines,
-    serviceCents: allocation.totalCents, // the one all-inclusive price (protection folded in)
+    serviceCents: allocation.totalCents, // the one all-inclusive price (base + extra helpers; nothing on top)
     helperHourlyCents: policy.helperHourlyCents,
     helperMinimumHours: policy.helperMinimumMinutes / 60,
   };
