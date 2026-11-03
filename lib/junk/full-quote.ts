@@ -89,12 +89,11 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     policy,
   });
 
-  const priceLines = base.lines.filter((l) => l.label !== "Booking protection");
-  const lines: JunkQuoteLine[] = [
-    ...priceLines,
-    ...allocation.lines,
-    { label: "Booking protection", cents: base.bookingProtectionFeeCents },
-  ];
+  // A3 (Model B, owner decision 2 Nov): the customer sees ONE all-inclusive
+  // price with booking protection FOLDED IN — no separate protection line — and
+  // the internal crew/helper/disposal split is never itemized to the customer
+  // (role privacy §6). The full breakdown lives in `plan` for admin/audit.
+  const lines: JunkQuoteLine[] = [{ label: "All-inclusive junk removal", cents: allocation.totalCents }];
 
   const plan: JunkQuotePlan = {
     model: JUNK_ALLOCATION_MODEL,
@@ -137,7 +136,7 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     totalCents: allocation.totalCents,
     estimatedHours: base.estimatedHours,
     lines,
-    serviceCents: allocation.allInCents,
+    serviceCents: allocation.totalCents, // the one all-inclusive price (protection folded in)
     helperHourlyCents: policy.helperHourlyCents,
     helperMinimumHours: policy.helperMinimumMinutes / 60,
   };
