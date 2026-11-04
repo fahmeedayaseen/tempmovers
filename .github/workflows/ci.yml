@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [feature/model-b-pricing]
+  pull_request:
+    branches: [staging-integration]
+
+jobs:
+  model-b:
+    name: Typecheck + Model B tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript compile (whole branch)
+        run: npx tsc --noEmit
+      - name: Model B unit tests (pricing, payouts, labor-only, classification)
+        run: npx vitest run tests/junk tests/labor
+      - name: Full test suite (informational — some suites need app env/DB)
+        run: npx vitest run
+        continue-on-error: true
+      - name: Lint (informational)
+        run: npm run lint
+        continue-on-error: true
