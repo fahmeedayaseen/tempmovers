@@ -200,12 +200,12 @@ describe("crew fulfillment routing (PLATFORM / OWN / HYBRID)", () => {
   it("worked example: 2 hauler + 2 TM helpers @3h → hauler business gets $544.32 (service + own crew), TM workers $180, reconciled", () => {
     // Funded at the 4-helper price from the pricing handoff ($1,034.74).
     const s = settleJunkCrew({
-      fundedAllInCents: 103474, bookingProtectionCents: 0, requiredHelperCount: 4, haulerPayeeId: "hauler_biz",
+      fundedAllInCents: 103474, bookingProtectionCents: 0, requiredHelperCount: 4, haulerPayeeId: "hauler_biz", haulerClassificationVerified: true,
       committedCrew: [
-        { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true },
-        { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true },
-        { source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true },
-        { source: "PLATFORM", payeeId: "wkr_B", requiredBySafety: true },
+        { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true, classificationVerified: true },
+        { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true, classificationVerified: true },
+        { source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true, classificationVerified: true },
+        { source: "PLATFORM", payeeId: "wkr_B", requiredBySafety: true, classificationVerified: true },
       ],
       attendance: [0, 1, 2, 3].map((i) => ({ slotIndex: i, attended: true, verified: true, actualMinutes: 180 })),
       policy,
@@ -223,8 +223,8 @@ describe("crew fulfillment routing (PLATFORM / OWN / HYBRID)", () => {
 
   it("hybrid: each verified helper paid once to its own payee; hauler business = service + own crew", () => {
     const s = settleJunkCrew({
-      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2, haulerPayeeId: "hauler_biz",
-      committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true }, { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true }],
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2, haulerPayeeId: "hauler_biz", haulerClassificationVerified: true,
+      committedCrew: [{ source: "PLATFORM", payeeId: "wkr_A", requiredBySafety: true, classificationVerified: true }, { source: "OWN", payeeId: "hauler_biz", requiredBySafety: true, classificationVerified: true }],
       attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 1, attended: true, verified: true, actualMinutes: 120 }],
       policy,
     });
@@ -235,6 +235,21 @@ describe("crew fulfillment routing (PLATFORM / OWN / HYBRID)", () => {
     expect(hauler.amountCents).toBe(20000); // $140 service + $60 own helper
     expect(s.transfers.filter((t) => t.recipient === "WORKER").reduce((a, t) => a + t.amountCents, 0)).toBe(6000); // the one TM helper
     expect(s.transfers.reduce((a, t) => a + t.amountCents, 0)).toBe(37143);
+  });
+
+  it("classification incomplete → payout HELD (hauler business or a TM worker unverified)", () => {
+    const base = {
+      fundedAllInCents: 37143, bookingProtectionCents: 0, requiredHelperCount: 2,
+      haulerPayeeId: "hauler_biz",
+      committedCrew: [{ source: "PLATFORM" as const, payeeId: "wkr_A", requiredBySafety: true, classificationVerified: true }, { source: "OWN" as const, payeeId: "hauler_biz", requiredBySafety: true, classificationVerified: true }],
+      attendance: [{ slotIndex: 0, attended: true, verified: true, actualMinutes: 120 }, { slotIndex: 1, attended: true, verified: true, actualMinutes: 120 }],
+      policy,
+    };
+    expect(settleJunkCrew({ ...base, haulerClassificationVerified: false }).requiresHold).toBe(true);
+    const tmUnverified = { ...base, haulerClassificationVerified: true, committedCrew: [{ source: "PLATFORM" as const, payeeId: "wkr_A", requiredBySafety: true, classificationVerified: false }, { source: "OWN" as const, payeeId: "hauler_biz", requiredBySafety: true, classificationVerified: true }] };
+    const held = settleJunkCrew(tmUnverified);
+    expect(held.requiresHold).toBe(true);
+    expect(held.rows.length).toBe(0);
   });
 
   it("hauler arrives short of the committed/safety crew: HOLD, and the missing helper's pay is never redirected to the hauler", () => {

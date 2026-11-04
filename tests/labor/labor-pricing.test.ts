@@ -29,14 +29,25 @@ describe("labor-only pricing", () => {
   it("settlement: workers paid $30/hr, platform keeps fee + $0.01 remainder, reconciles", () => {
     const s = settleLaborOnly({
       fundedAllInCents: 25716,
-      workers: [{ payeeId: "w1", actualMinutes: 180 }, { payeeId: "w2", actualMinutes: 180 }],
+      workers: [{ payeeId: "w1", actualMinutes: 180, classificationVerified: true }, { payeeId: "w2", actualMinutes: 180, classificationVerified: true }],
       policy: DEFAULT_LABOR_ONLY_POLICY,
     });
+    expect(s.requiresHold).toBe(false);
     expect(s.platformFeeCents).toBe(7715);
     expect(s.workerCompCents).toBe(18000);
     expect(s.platformNetCents).toBe(7716); // fee + $0.01 rounding remainder
     expect(s.remainderCents).toBe(1);
     expect(s.rows.reduce((a, r) => a + r.amountCents, 0)).toBe(25716);
     expect(s.rows.filter((r) => r.recipient === "WORKER").every((r) => r.amountCents === 9000)).toBe(true);
+  });
+
+  it("classification incomplete → payout HELD, no rows", () => {
+    const s = settleLaborOnly({
+      fundedAllInCents: 25716,
+      workers: [{ payeeId: "w1", actualMinutes: 180, classificationVerified: true }, { payeeId: "w2", actualMinutes: 180 /* unverified */ }],
+      policy: DEFAULT_LABOR_ONLY_POLICY,
+    });
+    expect(s.requiresHold).toBe(true);
+    expect(s.rows.length).toBe(0);
   });
 });

@@ -412,6 +412,8 @@ export type CommittedCrewSlot = {
   payeeId: string | null;
   /** Whether this slot counts toward the job's safety-required headcount. */
   requiredBySafety: boolean;
+  /** Worker-classification verification complete for this payee (owner decision 3 Nov). A PLATFORM slot pays its own worker, so it needs its own verification; OWN slots are covered by the hauler business's verification. Absent/false → payout HELD. */
+  classificationVerified?: boolean;
 };
 
 /** Verified attendance/time for a committed slot at completion. */
@@ -473,6 +475,8 @@ export function settleJunkCrew(input: {
   requiredHelperCount: number;
   /** The hauler business's approved payout recipient — receives the service residual plus its own-crew helper allocations. */
   haulerPayeeId: string;
+  /** Worker-classification verification complete for the hauler business (covers its own-crew helpers). Absent/false → payout HELD (owner decision 3 Nov). */
+  haulerClassificationVerified?: boolean;
   actualDisposalCents?: number | null;
   policy: Pick<JunkAllocationPolicy, "platformFeeBps" | "helperHourlyCents" | "helperMinimumMinutes" | "helperIncrementMinutes" | "haulerFloorCents">;
 }): CrewSettlement {
@@ -529,6 +533,16 @@ export function settleJunkCrew(input: {
     );
   }
   if (missingPayee) return mkHold("A verified crew slot has no approved payee; settlement HELD until an approved recipient is configured (no payee swaps after funding).");
+
+  // Worker-classification gate (owner decision 3 Nov): no payout releases where
+  // classification verification is incomplete. The hauler business must be
+  // verified (it receives the service residual and pays its own-crew helpers);
+  // each PLATFORM-supplied worker must be verified individually.
+  if (input.haulerClassificationVerified !== true)
+    return mkHold("Hauler business worker-classification verification incomplete; payout HELD until contractor/employee classification is verified.");
+  const unclassified = verifiedSlots.filter((x) => x.slot.source === "PLATFORM" && x.slot.classificationVerified !== true);
+  if (unclassified.length > 0)
+    return mkHold(`${unclassified.length} TempMovers-supplied worker(s) lack classification verification; payout HELD until verified.`);
 
   // Pay each verified slot once, for its actual payable time, to its payee.
   const helperRows: CrewSettlementRow[] = verifiedSlots.map((x) => {

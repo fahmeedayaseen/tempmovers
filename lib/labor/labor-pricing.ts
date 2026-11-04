@@ -87,6 +87,8 @@ export type LaborOnlySettlement = {
   platformNetCents: number;
   workerCompCents: number;
   remainderCents: number;
+  /** True when no payout may release (e.g. a worker's classification verification is incomplete). Rows are empty when held. */
+  requiresHold: boolean;
   exceptions: string[];
   rows: LaborOnlySettlementRow[];
 };
@@ -99,12 +101,23 @@ export type LaborOnlySettlement = {
  */
 export function settleLaborOnly(input: {
   fundedAllInCents: number;
-  workers: { payeeId: string; actualMinutes: number }[];
+  workers: { payeeId: string; actualMinutes: number; classificationVerified?: boolean }[];
   policy: Pick<LaborOnlyPolicy, "workerHourlyCents" | "platformFeeBps" | "minimumMinutes" | "incrementMinutes">;
 }): LaborOnlySettlement {
   const { policy } = input;
   if (!Number.isInteger(input.fundedAllInCents) || input.fundedAllInCents < 0) throw new JunkAllocationError("Funded amount must be whole, non-negative cents.");
   const exceptions: string[] = [];
+
+  // Worker-classification gate (owner decision 3 Nov): no labor-only payout
+  // releases where a worker's classification verification is incomplete.
+  const unclassified = input.workers.filter((w) => w.classificationVerified !== true).length;
+  if (unclassified > 0) {
+    return {
+      collectedCents: input.fundedAllInCents, platformFeeCents: junkPlatformFeeCents(input.fundedAllInCents, policy.platformFeeBps),
+      platformNetCents: 0, workerCompCents: 0, remainderCents: 0, requiresHold: true,
+      exceptions: [`${unclassified} labor-only worker(s) lack classification verification; payout HELD until verified.`], rows: [],
+    };
+  }
   const timePolicy = { helperMinimumMinutes: policy.minimumMinutes, helperIncrementMinutes: policy.incrementMinutes };
   const workerRows: LaborOnlySettlementRow[] = input.workers.map((w) => {
     const minutes = helperPayableMinutes(w.actualMinutes, timePolicy);
@@ -121,5 +134,5 @@ export function settleLaborOnly(input: {
   const rows: LaborOnlySettlementRow[] = [{ recipient: "PLATFORM", amountCents: platformNetCents }, ...workerRows];
   const sum = rows.reduce((a, r) => a + r.amountCents, 0);
   if (sum !== input.fundedAllInCents) throw new JunkAllocationError(`Labor-only settlement does not balance: ${sum} vs ${input.fundedAllInCents}.`);
-  return { collectedCents: input.fundedAllInCents, platformFeeCents, platformNetCents, workerCompCents, remainderCents, exceptions, rows };
+  return { collectedCents: input.fundedAllInCents, platformFeeCents, platformNetCents, workerCompCents, remainderCents, requiresHold: false, exceptions, rows };
 }
