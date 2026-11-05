@@ -1,0 +1,69 @@
+name: TempMovers staging database migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_only:
+        description: 'Type MIGRATE_STAGING_ONLY to permit migration'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tempmovers-staging-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate-staging:
+    if: ${{ inputs.confirm_staging_only == 'MIGRATE_STAGING_ONLY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout approved Model B branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/model-b-pricing
+          persist-credentials: false
+
+      - name: Configure Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate staging target and Prisma schema
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          EXPECTED_STAGING_HOST: ${{ vars.EXPECTED_STAGING_DB_HOST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const raw = process.env.DATABASE_URL || '';
+          const expected = process.env.EXPECTED_STAGING_HOST || '';
+          if (!raw || !expected) throw new Error('Missing STAGING_DATABASE_URL or EXPECTED_STAGING_DB_HOST');
+          const u = new URL(raw);
+          if (!['postgres:', 'postgresql:'].includes(u.protocol)) throw new Error('Not PostgreSQL');
+          if (!u.hostname.endsWith('.neon.tech')) throw new Error('Not a Neon database host');
+          if (u.hostname !== expected) throw new Error('Staging host does not match expected Neon host');
+          if (u.pathname !== '/neondb') throw new Error('Database name is not neondb');
+          if (!u.password) throw new Error('Database credentials missing password');
+          if (!['require', 'verify-full'].includes(u.searchParams.get('sslmode'))) throw new Error('Require SSL verification');
+          console.log('Staging database guard passed; credentials withheld');
+          NODE
+          npx prisma validate
+
+      - name: Apply committed migrations to staging only
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Verify migration state
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: npx prisma migrate status
