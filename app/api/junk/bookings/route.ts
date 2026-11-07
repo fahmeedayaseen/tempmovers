@@ -103,7 +103,11 @@ export async function POST(request: Request) {
   }
   // Never book (and never collect payment) against unapproved example pricing
   // (directive §5/§94): an unapproved market cannot produce a bookable quote.
-  const availability = await resolveJunkMarketAvailability(market.marketCode);
+  const availability = await resolveJunkMarketAvailability(market.marketCode, {
+    serviceLevel: input.details.serviceLevel,
+    pricingMode: input.details.pricingMode,
+    volumeTier: input.details.pricingMode === "VOLUME" ? input.details.volumeTier : null,
+  });
   if (availability.state !== "AVAILABLE") {
     return NextResponse.json({ error: availability.reason, code: availability.code, state: availability.state }, { status: 409 });
   }

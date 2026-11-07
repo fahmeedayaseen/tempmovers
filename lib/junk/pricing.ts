@@ -144,37 +144,96 @@ export const MAX_JUNK_ITEM_QUANTITY = 20;
 
 const cents = z.number().int().min(0).max(1_000_000);
 
-/** What an admin may store in PricingRule.junkPriceTable. Every part is optional; anything left out keeps its default. */
-export type JunkPriceTableOverride = {
+/** One set of price overrides (shared, or specific to a service level). */
+export type JunkServiceLevelPriceOverride = {
   minimumCents?: number;
   tiersCents?: Partial<Record<JunkVolumeTierCode, number>>;
   itemsCents?: Partial<Record<JunkItemCode, number>>;
   surchargesCents?: Partial<Record<JunkSpecialItemCode, number>>;
 };
-export const junkPriceTableOverrideSchema = z.object({
+
+/**
+ * What an admin may store in PricingRule.junkPriceTable. Every part is optional.
+ * `serviceLevels` holds prices approved SEPARATELY for ECONOMY and FULL_SERVICE
+ * (correction 1): an Economy approval writes only into serviceLevels.ECONOMY and
+ * can never overwrite a Full-Service rate, and vice versa. The top-level
+ * tiersCents/itemsCents remain for backward compatibility and are read as the
+ * FULL_SERVICE price only (every pre-existing booking is FULL_SERVICE).
+ */
+export type JunkPriceTableOverride = JunkServiceLevelPriceOverride & {
+  serviceLevels?: Partial<Record<JunkServiceLevelCode, JunkServiceLevelPriceOverride>>;
+};
+
+const junkServiceLevelPriceOverrideSchema = z.object({
   minimumCents: cents.optional(),
   tiersCents: z.record(z.enum(JUNK_VOLUME_TIERS), cents).optional(),
   itemsCents: z.record(z.enum(JUNK_ITEM_CODES), cents).optional(),
   surchargesCents: z.record(z.enum(JUNK_SPECIAL_ITEM_CODES), cents).optional(),
 }).strict();
 
+export const junkPriceTableOverrideSchema = junkServiceLevelPriceOverrideSchema.extend({
+  serviceLevels: z.record(z.enum(JUNK_SERVICE_LEVELS), junkServiceLevelPriceOverrideSchema).optional(),
+}).strict();
+
 /**
- * Merges a stored override over the defaults. A malformed stored value falls
- * back to the defaults entirely rather than pricing from half a table; the
- * admin route validates with the same schema, so that only happens if a row
- * was edited by hand.
+ * Merges a stored override over the defaults, for a given service level (if
+ * supplied, its specific prices layer on top of the shared ones). A malformed
+ * stored value falls back to the defaults entirely rather than pricing from half
+ * a table; the admin route validates with the same schema.
+ *
+ * NOTE: this merge includes the built-in DEFAULTS so every tier has a number for
+ * computation. Whether a given (serviceLevel, tier) is actually APPROVED for
+ * billing is a separate question answered by resolveApprovedJunkPrice(); the
+ * availability gate uses that, so an unapproved tier never reaches a billed quote.
  */
-export function resolveJunkPriceTable(override: unknown): JunkPriceTable {
+export function resolveJunkPriceTable(override: unknown, serviceLevel?: JunkServiceLevelCode): JunkPriceTable {
   if (override == null) return DEFAULT_JUNK_PRICE_TABLE;
   const parsed = junkPriceTableOverrideSchema.safeParse(override);
   if (!parsed.success) return DEFAULT_JUNK_PRICE_TABLE;
-  const o = parsed.data;
+  const base: JunkServiceLevelPriceOverride = parsed.data;
+  const sl: JunkServiceLevelPriceOverride = (serviceLevel && parsed.data.serviceLevels?.[serviceLevel]) || {};
   return {
-    minimumCents: o.minimumCents ?? DEFAULT_JUNK_PRICE_TABLE.minimumCents,
-    tiersCents: { ...DEFAULT_JUNK_PRICE_TABLE.tiersCents, ...o.tiersCents },
-    itemsCents: { ...DEFAULT_JUNK_PRICE_TABLE.itemsCents, ...o.itemsCents },
-    surchargesCents: { ...DEFAULT_JUNK_PRICE_TABLE.surchargesCents, ...o.surchargesCents },
+    minimumCents: sl.minimumCents ?? base.minimumCents ?? DEFAULT_JUNK_PRICE_TABLE.minimumCents,
+    tiersCents: { ...DEFAULT_JUNK_PRICE_TABLE.tiersCents, ...base.tiersCents, ...sl.tiersCents },
+    itemsCents: { ...DEFAULT_JUNK_PRICE_TABLE.itemsCents, ...base.itemsCents, ...sl.itemsCents },
+    surchargesCents: { ...DEFAULT_JUNK_PRICE_TABLE.surchargesCents, ...base.surchargesCents, ...sl.surchargesCents },
   };
+}
+
+/**
+ * Whether THIS market's stored override carries an explicitly-configured
+ * (approved) price for the requested service level and job, versus inheriting a
+ * built-in example. Used by the availability gate (correction 2): a billable
+ * quote is only issued when the exact service-level + tier price is approved —
+ * never from DEFAULT_JUNK_PRICE_TABLE and never from another service level.
+ *
+ * Back-compat: the top-level tiersCents/itemsCents (no serviceLevels block)
+ * count as the FULL_SERVICE approved price only, so existing markets keep
+ * working and ECONOMY can never inherit a Full-Service rate.
+ */
+export function resolveApprovedJunkPrice(
+  rawOverride: unknown,
+  serviceLevel: JunkServiceLevelCode,
+  job: { pricingMode: JunkPricingModeCode; volumeTier: JunkVolumeTierCode | null },
+): { approved: true } | { approved: false; reason: string } {
+  const parsed = rawOverride == null ? null : junkPriceTableOverrideSchema.safeParse(rawOverride);
+  if (!parsed || !parsed.success) return { approved: false, reason: "This market has no approved junk price table." };
+  const o = parsed.data;
+  const sl = o.serviceLevels?.[serviceLevel];
+
+  if (job.pricingMode === "VOLUME") {
+    if (!job.volumeTier) return { approved: false, reason: "No volume tier on the request." };
+    if (typeof sl?.tiersCents?.[job.volumeTier] === "number") return { approved: true };
+    if (serviceLevel === "FULL_SERVICE" && typeof o.tiersCents?.[job.volumeTier] === "number") return { approved: true };
+    return { approved: false, reason: `No approved ${serviceLevel} price for the ${job.volumeTier} tier in this market.` };
+  }
+
+  // ITEMS mode: approved when the market has configured item prices for this
+  // service level (or, for FULL_SERVICE, legacy top-level item prices).
+  const slHasItems = sl?.itemsCents != null && Object.keys(sl.itemsCents).length > 0;
+  const legacyItems = serviceLevel === "FULL_SERVICE" && o.itemsCents != null && Object.keys(o.itemsCents).length > 0;
+  if (slHasItems || legacyItems) return { approved: true };
+  return { approved: false, reason: `No approved ${serviceLevel} item pricing in this market.` };
 }
 
 export class JunkQuoteError extends Error {}

@@ -125,18 +125,43 @@ activate a market** — `resolveJunkMarketAvailability` requires the policy
 `PricingRule` (not a US-DEFAULT row). Proposed rates cannot be activated without
 an admin writing them into `PricingRule` (acceptance #10).
 
-### 6a. Approval path — recommendation → PricingRule (the only route to a live price)
+### 6a. Prices are separate per (market, service level, tier)
 
-`lib/junk/pricing-approval.ts` holds the sole mechanism:
+`PricingRule.junkPriceTable` carries a `serviceLevels` block:
+`serviceLevels.ECONOMY` and `serviceLevels.FULL_SERVICE` each hold their own
+`tiersCents` / `itemsCents`. `resolveJunkPriceTable(override, serviceLevel)`
+layers the service-level prices over the shared ones, and the quote resolves the
+table for the **job's** service level, so an Economy single-item rate and a
+Full-Service single-item rate are independent. The legacy top-level `tiersCents`
+is read as the **FULL_SERVICE** price only (every pre-existing booking is
+FULL_SERVICE), so existing markets keep working and Economy can never inherit a
+Full-Service rate. No schema migration is needed — this lives inside the existing
+`junkPriceTable` JSON column.
+
+### 6b. Approval path — recommendation → PricingRule (the only route to a live price)
+
+Pure part (`lib/junk/pricing-approval.ts`):
 `applyApprovedRecommendationToTable()` folds an **APPROVED** recommendation's
-price into the market's `PricingRule.junkPriceTable` tier map. It is a pure
-transform with a hard status gate — a PENDING or REJECTED recommendation throws,
-and a price below the recommendation's own floor is refused (defence in depth).
-It is never called automatically. Flow: engine writes PENDING → admin reviews
-and sets APPROVED (Phase 2 UI) → approval action applies the price and stamps the
-`PricingRule` active + `carlApprovedAt` → `resolveJunkMarketPricing()` then reads
-the approved table, so every live quote and booking is sourced from approved
-configuration, never example defaults.
+price into `serviceLevels[serviceLevel].tiersCents[tier]` — its **own** service
+level, never overwriting the other. `assertApprovable()` is the guard: it rejects
+an unauthorised role, any non-PENDING status (stale/superseded/rejected/
+duplicate), a price below the **current recomputed** floor, and an out-of-date
+floor.
+
+Authenticated/atomic part (`lib/junk/approve-recommendation.ts`,
+`POST /api/admin/junk/recommendations/[id]/approve`): an owner/admin-only action
+runs one interactive transaction — recompute the floor, run the guard, write the
+price into the market's `PricingRule` (service-level slot), flip the
+recommendation PENDING→APPROVED with a **status-guarded update** (optimistic
+concurrency / replay protection), and append an `AuditLog` event. Any failure
+rolls back, so a price is never written without its matching recommendation state
+and audit entry. It touches no live-payment or Stripe state.
+
+The availability gate requires **both** an approved exact market+serviceLevel+
+tier price (`resolveApprovedJunkPrice`) **and** the market's own approved payment
+policy; an active market row alone is insufficient, and US-DEFAULT/built-in
+defaults can never satisfy it. The booking recomputes server-side and the
+immutable plan snapshot records the `pricingRuleId` + `pricingRuleVersion` used.
 
 ## 7. Outstanding blockers (production-readiness)
 

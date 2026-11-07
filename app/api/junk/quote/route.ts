@@ -35,7 +35,12 @@ export async function POST(request: Request) {
 
   // Market Pricing Intelligence (Phase 1): never quote from unapproved example
   // amounts. An unapproved market routes to MANUAL_REVIEW instead of a price.
-  const availability = await resolveJunkMarketAvailability(market.marketCode);
+  const d = parsed.data.details;
+  const availability = await resolveJunkMarketAvailability(market.marketCode, {
+    serviceLevel: d.serviceLevel,
+    pricingMode: d.pricingMode,
+    volumeTier: d.pricingMode === "VOLUME" ? d.volumeTier : null,
+  });
   if (availability.state !== "AVAILABLE") {
     return NextResponse.json({ error: availability.reason, code: availability.code, state: availability.state }, { status: 409 });
   }

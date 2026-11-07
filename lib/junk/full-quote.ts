@@ -48,6 +48,9 @@ export type JunkQuotePlan = {
   totalCents: number;
   repriced: boolean;
   policyApprovedByCarl: boolean;
+  /** Immutable snapshot provenance (correction 2): which PricingRule/version priced this job. */
+  pricingRuleId: string | null;
+  pricingRuleVersion: string | null;
 };
 
 export type PublicJunkQuote = {
@@ -78,7 +81,11 @@ export type JunkFullQuote = {
   publicQuote: PublicJunkQuote;
 };
 
-export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymentPolicy): JunkFullQuote {
+export function buildJunkFullQuote(
+  input: JunkQuoteInput,
+  policy: ResolvedPaymentPolicy,
+  provenance?: { pricingRuleId: string | null; pricingRuleVersion: string | null },
+): JunkFullQuote {
   // The base price, crew size and hours come from Carl's tables, unchanged.
   const base = calculateJunkQuote(input);
   const disposalCents = estimateDisposalCents({ sizeRank: sizeRank(input), specialItems: input.specialItems }, policy);
@@ -129,6 +136,8 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     totalCents: allocation.totalCents,
     repriced: allocation.repriced,
     policyApprovedByCarl: policy.carlApprovedAt !== null,
+    pricingRuleId: provenance?.pricingRuleId ?? null,
+    pricingRuleVersion: provenance?.pricingRuleVersion ?? null,
   };
 
   const publicQuote: PublicJunkQuote = {
@@ -153,6 +162,11 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
 
 /** Prices a junk job for a market: Carl's tables plus the market's payment policy. */
 export async function quoteJunkForMarket(marketCode: string, details: JunkJobDetailsInput): Promise<JunkFullQuote> {
-  const [pricing, policy] = await Promise.all([resolveJunkMarketPricing(marketCode), resolvePaymentPolicy(marketCode)]);
-  return buildJunkFullQuote({ ...pricing, ...details }, policy);
+  // Resolve the price table for THIS job's service level so Economy and
+  // Full-Service prices are independent (correction 1).
+  const [pricing, policy] = await Promise.all([resolveJunkMarketPricing(marketCode, details.serviceLevel), resolvePaymentPolicy(marketCode)]);
+  return buildJunkFullQuote({ ...pricing, ...details }, policy, {
+    pricingRuleId: pricing.pricingRuleId,
+    pricingRuleVersion: pricing.pricingRuleVersion,
+  });
 }

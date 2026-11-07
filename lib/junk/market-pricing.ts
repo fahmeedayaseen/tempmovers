@@ -1,9 +1,13 @@
 import { prisma } from "@/lib/db";
 import { CUSTOMER_BOOKING_PROTECTION_FEE_CENTS } from "@/lib/pricing";
 import {
-  DEFAULT_JUNK_HELPER_SHARE_PERCENT, DEFAULT_JUNK_TAKE_RATE_PERCENT, resolveJunkPriceTable, type JunkPriceTable,
+  DEFAULT_JUNK_HELPER_SHARE_PERCENT, DEFAULT_JUNK_TAKE_RATE_PERCENT, resolveJunkPriceTable, resolveApprovedJunkPrice,
+  type JunkPriceTable, type JunkServiceLevelCode, type JunkPricingModeCode, type JunkVolumeTierCode,
 } from "@/lib/junk/pricing";
 import { resolvePaymentPolicy } from "@/lib/payments/policy";
+
+/** The job facets that decide which approved price applies (correction 1/2). */
+export type JunkPriceSelector = { serviceLevel: JunkServiceLevelCode; pricingMode: JunkPricingModeCode; volumeTier: JunkVolumeTierCode | null };
 
 // ---------------------------------------------------------------------------
 // Junk removal — VASRUE Digital Media, 28 October 2026.
@@ -20,6 +24,9 @@ export type JunkMarketPricing = {
   takeRatePercent: number;
   helperSharePercent: number;
   bookingProtectionCents: number;
+  /** Provenance for the immutable booking snapshot (correction 2): which rule/version priced this. */
+  pricingRuleId: string | null;
+  pricingRuleVersion: string | null;
 };
 
 /**
@@ -64,42 +71,53 @@ export type JunkAvailability =
  * rule) deliberately does NOT satisfy this — an unapproved market can never be
  * activated by the default, it is routed to manual review.
  */
-export function decideJunkAvailability(input: { marketServesZip: boolean; policyApprovedForMarket: boolean; hasActiveMarketPriceRule: boolean }): JunkAvailability {
+export function decideJunkAvailability(input: { marketServesZip: boolean; policyApprovedForMarket: boolean; hasApprovedExactRate: boolean }): JunkAvailability {
   if (!input.marketServesZip)
     return { state: "UNAVAILABLE", code: "JUNK_NOT_AVAILABLE", reason: "Junk removal isn't available in this area yet." };
-  if (!input.policyApprovedForMarket || !input.hasActiveMarketPriceRule)
+  // Correction 2: an active market row is NOT sufficient. The specific
+  // service-level + tier price must be individually approved for this market,
+  // AND the market's own payment policy must be owner-approved. Otherwise the
+  // request is routed to manual review rather than priced from any fallback.
+  if (!input.policyApprovedForMarket || !input.hasApprovedExactRate)
     return {
       state: "MANUAL_REVIEW",
       code: "JUNK_PRICING_UNAPPROVED",
-      reason: "Junk pricing for this market hasn't been approved yet, so no automatic quote can be issued. This request needs manual review.",
+      reason: "This market, service level and tier don't have an owner-approved price yet, so no automatic quote can be issued. This request needs manual review.",
     };
   return { state: "AVAILABLE" };
 }
 
-export async function resolveJunkMarketAvailability(marketCode: string): Promise<JunkAvailability> {
-  const [policy, rule] = await Promise.all([
+export async function resolveJunkMarketAvailability(marketCode: string, selector: JunkPriceSelector): Promise<JunkAvailability> {
+  const [policy, exactRule] = await Promise.all([
     resolvePaymentPolicy(marketCode),
     // Exact market match only — a US-DEFAULT rule must not activate this market.
     prisma.pricingRule.findFirst({ where: { marketCode, active: true } }),
   ]);
+  const approved = exactRule
+    ? resolveApprovedJunkPrice(exactRule.junkPriceTable, selector.serviceLevel, selector)
+    : { approved: false as const };
   return decideJunkAvailability({
     marketServesZip: true,
     // Must be this market's OWN approved policy (source "market"), not the
     // default-row fallback, and it must carry an owner approval timestamp.
     policyApprovedForMarket: policy.source === "market" && policy.carlApprovedAt != null,
-    hasActiveMarketPriceRule: rule != null,
+    // The exact service-level + tier price must be explicitly approved here.
+    hasApprovedExactRate: approved.approved,
   });
 }
 
-export async function resolveJunkMarketPricing(marketCode: string): Promise<JunkMarketPricing> {
+export async function resolveJunkMarketPricing(marketCode: string, serviceLevel?: JunkServiceLevelCode): Promise<JunkMarketPricing> {
   const rules = await prisma.pricingRule.findMany({
     where: { marketCode: { in: [marketCode, "US-DEFAULT"] }, active: true },
   });
-  const rule = rules.find((r) => r.marketCode === marketCode) ?? rules.find((r) => r.marketCode === "US-DEFAULT") ?? null;
+  const exact = rules.find((r) => r.marketCode === marketCode) ?? null;
+  const rule = exact ?? rules.find((r) => r.marketCode === "US-DEFAULT") ?? null;
   return {
-    table: resolveJunkPriceTable(rule?.junkPriceTable ?? null),
+    table: resolveJunkPriceTable(rule?.junkPriceTable ?? null, serviceLevel),
     takeRatePercent: rule?.junkTakeRatePercent ?? DEFAULT_JUNK_TAKE_RATE_PERCENT,
     helperSharePercent: rule?.junkHelperSharePercent ?? DEFAULT_JUNK_HELPER_SHARE_PERCENT,
     bookingProtectionCents: rule?.customerBookingProtectionFeeCents ?? CUSTOMER_BOOKING_PROTECTION_FEE_CENTS,
+    pricingRuleId: rule?.id ?? null,
+    pricingRuleVersion: rule?.updatedAt?.toISOString() ?? null,
   };
 }
