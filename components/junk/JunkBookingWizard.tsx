@@ -317,7 +317,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
               {quote.lines.map((l) => <div className="quoteRow" key={l.label}><span>{l.label}</span><strong>{money(l.cents)}</strong></div>)}
               <div className="quoteRow total"><span>Total</span><strong>{money(quote.totalCents)}</strong></div>
             </div>
-            <p className="footerNote">Includes {money(quote.disposalEstimateCents)} set aside for the dump. If disposal costs less, the difference is refunded to you in full. If it will cost more, you'll be asked to approve and pay the difference before the crew goes to the dump.</p>
+            <p className="footerNote">This is your all-inclusive price — loading, hauling and responsible disposal are included. There is no separate dump fee and no disposal surcharge.</p>
             <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
               <button className="btn btnSecondary" onClick={() => setStep(1)}>Back</button>
               <button className="btn btnPrimary" onClick={() => { setError(null); setStep(3); }}>Continue</button>

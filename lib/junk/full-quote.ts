@@ -7,13 +7,13 @@ import type { JunkJobDetailsInput } from "@/lib/junk/request-schema";
 // ---------------------------------------------------------------------------
 // Junk quote under the full allocation model — VASRUE Digital Media, 29 Oct 2026.
 //
-// Carl's tier and item prices (junk spec §5) set the base all-in price; the
-// payment spec §5–§6 then carves out the disposal set-aside, takes the
-// platform fee on the service subtotal only, plans hourly helpers, raises the
-// price for a second helper and reprices anything that would leave the hauler
-// under the earnings floor. The customer sees one total, what it includes,
-// and that unused disposal comes back to them. The crew split stays internal
-// and is snapshotted onto the booking as the quote's plan.
+// Model B (2 Nov 2026): Carl's tier/item prices set the base price; the engine
+// takes the 30% platform fee on the FULL price, plans hourly helpers, grosses
+// up the price for additional helpers so the hauler is never docked, and
+// reprices anything that would leave the hauler under the earnings floor.
+// Disposal is an INTERNAL estimate only — never a customer line, never
+// reimbursed, never refunded. The customer sees ONE flat all-inclusive price;
+// the crew split stays internal and is snapshotted onto the booking as the plan.
 // ---------------------------------------------------------------------------
 
 export const JUNK_ALLOCATION_MODEL = "JUNK_FULL_ALLOCATION_V1" as const;
@@ -23,11 +23,11 @@ export type JunkQuotePlan = {
   policyVersion: string;
   marketCode: string;
   basePriceCents: number;
-  secondHelperAdjustmentCents: number;
+  helperGrossUpCents: number;
   floorAdjustmentCents: number;
   allInCents: number;
+  /** Internal disposal ESTIMATE only (Model B): a pricing input, never billed, reimbursed or refunded. Admin/margin-reporting field. */
   disposalCents: number;
-  subtotalCents: number;
   platformFeeBps: number;
   platformFeeCents: number;
   helperHourlyCents: number;
@@ -61,9 +61,8 @@ export type PublicJunkQuote = {
   estimatedHours: number;
   /** Lines that add up to the total. */
   lines: JunkQuoteLine[];
-  /** What the all-in price includes: service, and the disposal set-aside refunded if unused. */
+  /** The one flat all-inclusive service price (Model B). No separate disposal line — internal disposal is never shown to the customer. */
   serviceCents: number;
-  disposalEstimateCents: number;
   /** Helper pay basis, shown to the customer so the crew size is explained. */
   helperHourlyCents: number;
   helperMinimumHours: number;
@@ -82,31 +81,32 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
   const base = calculateJunkQuote(input);
   const disposalCents = estimateDisposalCents({ sizeRank: sizeRank(input), specialItems: input.specialItems }, policy);
   const crew = planJunkCrew({ helperCount: base.helpersRequired, estimatedHours: base.estimatedHours }, policy);
+  // Crew-pricing handoff (2 Nov): the single checkout price is base + extra
+  // helper-hour charges only. NOTHING is added on top — no mandatory booking
+  // protection, no disposal fee. So junk carries no protection add-on.
+  const bookingProtectionCents = 0;
   const allocation = quoteJunkAllocation({
     basePriceCents: base.allInCents,
-    disposalCents,
+    disposalEstimateCents: disposalCents,
     crew,
-    bookingProtectionCents: base.bookingProtectionFeeCents,
+    bookingProtectionCents,
     policy,
   });
 
-  const priceLines = base.lines.filter((l) => l.label !== "Booking protection");
-  const lines: JunkQuoteLine[] = [
-    ...priceLines,
-    ...allocation.lines,
-    { label: "Booking protection", cents: base.bookingProtectionFeeCents },
-  ];
+  // The customer sees ONE all-inclusive price (= base + extra helper-hour
+  // charges); the internal crew/helper/disposal split is never itemized to the
+  // customer (role privacy §6). The full breakdown lives in `plan` for admin.
+  const lines: JunkQuoteLine[] = [{ label: "All-inclusive junk removal", cents: allocation.totalCents }];
 
   const plan: JunkQuotePlan = {
     model: JUNK_ALLOCATION_MODEL,
     policyVersion: PAYMENT_POLICY_VERSION,
     marketCode: policy.marketCode,
     basePriceCents: base.allInCents,
-    secondHelperAdjustmentCents: allocation.secondHelperAdjustmentCents,
+    helperGrossUpCents: allocation.helperGrossUpCents,
     floorAdjustmentCents: allocation.floorAdjustmentCents,
     allInCents: allocation.allInCents,
-    disposalCents: allocation.disposalCents,
-    subtotalCents: allocation.subtotalCents,
+    disposalCents: allocation.disposalEstimateCents,
     platformFeeBps: policy.platformFeeBps,
     platformFeeCents: allocation.platformFeeCents,
     helperHourlyCents: policy.helperHourlyCents,
@@ -122,7 +122,7 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     haulerTransferCents: allocation.haulerTransferCents,
     haulerFloorCents: policy.haulerFloorCents,
     truckAllowanceCents: policy.truckAllowanceCents,
-    bookingProtectionCents: base.bookingProtectionFeeCents,
+    bookingProtectionCents,
     totalCents: allocation.totalCents,
     repriced: allocation.repriced,
     policyApprovedByCarl: policy.carlApprovedAt !== null,
@@ -135,12 +135,11 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     allInCents: allocation.allInCents,
     helpersRequired: base.helpersRequired,
     crewSize: base.crewSize,
-    bookingProtectionFeeCents: base.bookingProtectionFeeCents,
+    bookingProtectionFeeCents: bookingProtectionCents,
     totalCents: allocation.totalCents,
     estimatedHours: base.estimatedHours,
     lines,
-    serviceCents: allocation.allInCents - allocation.disposalCents,
-    disposalEstimateCents: allocation.disposalCents,
+    serviceCents: allocation.totalCents, // the one all-inclusive price (base + extra helpers; nothing on top)
     helperHourlyCents: policy.helperHourlyCents,
     helperMinimumHours: policy.helperMinimumMinutes / 60,
   };
