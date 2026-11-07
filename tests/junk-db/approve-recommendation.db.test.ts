@@ -95,7 +95,7 @@ describe.skipIf(!HAS_DB)("approveMarketRecommendation (DB transaction)", () => {
       .rejects.toThrow(RecommendationNotApprovedError);
   });
 
-  it("concurrent approvals: exactly one wins", async () => {
+  it("concurrent approvals of the SAME recommendation: exactly one wins", async () => {
     const market = await makeMarket();
     const admin = await makeAdmin("ADMIN", { marketId: market.id });
     const rec = await makeRecommendation(market.marketCode);
@@ -105,6 +105,28 @@ describe.skipIf(!HAS_DB)("approveMarketRecommendation (DB transaction)", () => {
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+  });
+
+  it("concurrent approvals of DIFFERENT tiers/levels for one market BOTH persist (row lock prevents lost updates)", async () => {
+    const market = await makeMarket();
+    const admin = await makeAdmin("ADMIN", { marketId: market.id });
+    const recA = await makeRecommendation(market.marketCode, { serviceLevel: "FULL_SERVICE", volumeTier: "HALF", recommendedPriceCents: 37200 });
+    const floorEco = await floorFor(market.marketCode, "ECONOMY", "SINGLE_ITEM");
+    const recB = await makeRecommendation(market.marketCode, { serviceLevel: "ECONOMY", volumeTier: "SINGLE_ITEM", recommendedPriceCents: floorEco + 3000, floorPriceCents: floorEco });
+
+    const results = await Promise.allSettled([
+      approveMarketRecommendation({ recommendationId: recA.id, actingUserId: admin, actingRole: "ADMIN" }),
+      approveMarketRecommendation({ recommendationId: recB.id, actingUserId: admin, actingRole: "ADMIN" }),
+    ]);
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+
+    const rule = await prisma.pricingRule.findUnique({ where: { marketCode: market.marketCode } });
+    const table = rule!.junkPriceTable as unknown as { serviceLevels?: { FULL_SERVICE?: { tiersCents?: Record<string, number> }; ECONOMY?: { tiersCents?: Record<string, number> } } };
+    // BOTH approved prices retained — neither slot clobbered the other.
+    expect(table.serviceLevels?.FULL_SERVICE?.tiersCents?.HALF).toBe(37200);
+    expect(table.serviceLevels?.ECONOMY?.tiersCents?.SINGLE_ITEM).toBe(floorEco + 3000);
+    const audits = await prisma.auditLog.findMany({ where: { action: "JUNK_PRICE_APPROVED", entityId: { in: [recA.id, recB.id] } } });
+    expect(audits).toHaveLength(2);
   });
 
   it("below-floor recommendation rolls back entirely (no price written, still PENDING, no audit)", async () => {
@@ -149,40 +171,51 @@ describe.skipIf(!HAS_DB)("approveMarketRecommendation (DB transaction)", () => {
   });
 });
 
-describe.skipIf(!HAS_DB)("approveLegacyFullServicePricing (DB)", () => {
-  it("blesses a market's legacy prices so they become billable Full-Service rates (audited)", async () => {
+describe.skipIf(!HAS_DB)("approveLegacyFullServicePricing (DB, explicit reviewed rates)", () => {
+  it("writes the EXPLICIT reviewed rate into the FS slot, makes it billable, and audits the values", async () => {
     const market = await makeMarket({ junkPriceTable: { tiersCents: { HALF: 32900 } } });
     const admin = await makeAdmin("ADMIN", { marketId: market.id });
-    // Before: legacy prices are not billable.
     const before = await prisma.pricingRule.findUnique({ where: { marketCode: market.marketCode } });
+    // Legacy top-level is not billable on its own.
     expect(resolveApprovedJunkPrice(before!.junkPriceTable, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
 
-    await approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN" });
+    await approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN", rates: { tiers: { HALF: 32900 } } });
 
     const after = await prisma.pricingRule.findUnique({ where: { marketCode: market.marketCode } });
+    const table = after!.junkPriceTable as unknown as { serviceLevels?: { FULL_SERVICE?: { tiersCents?: { HALF?: number } } } };
+    expect(table.serviceLevels?.FULL_SERVICE?.tiersCents?.HALF).toBe(32900);
     expect(resolveApprovedJunkPrice(after!.junkPriceTable, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(true);
-    expect(await prisma.auditLog.findFirst({ where: { action: "JUNK_LEGACY_PRICING_APPROVED", entityId: before!.id } })).not.toBeNull();
+    const audit = await prisma.auditLog.findFirst({ where: { action: "JUNK_LEGACY_PRICING_APPROVED", entityId: before!.id } });
+    expect(audit).not.toBeNull();
+    expect((audit!.details as unknown as { approvedTiersCents?: { HALF?: number } }).approvedTiersCents?.HALF).toBe(32900);
   });
 
-  it("a cross-market legacy approval is rejected", async () => {
+  it("rejects a reviewed rate below the current floor", async () => {
+    const market = await makeMarket({ junkPriceTable: { tiersCents: { HALF: 32900 } } });
+    const admin = await makeAdmin("ADMIN", { marketId: market.id });
+    await expect(approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN", rates: { tiers: { HALF: 1000 } } }))
+      .rejects.toThrow(RecommendationNotApprovedError);
+  });
+
+  it("rejects when the market has no owner-approved payment policy", async () => {
+    const market = await makeMarket({ approvedPolicy: false, junkPriceTable: { tiersCents: { HALF: 32900 } } });
+    const admin = await makeAdmin("ADMIN", { platform: true });
+    await expect(approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN", rates: { tiers: { HALF: 32900 } } }))
+      .rejects.toThrow(MarketPolicyNotApprovedError);
+  });
+
+  it("rejects a cross-market legacy approval", async () => {
     const marketA = await makeMarket({ junkPriceTable: { tiersCents: { HALF: 32900 } } });
     const marketB = await makeMarket({ junkPriceTable: { tiersCents: { HALF: 32900 } } });
     const adminA = await makeAdmin("ADMIN", { marketId: marketA.id });
-    await expect(approveLegacyFullServicePricing({ marketCode: marketB.marketCode, actingUserId: adminA, actingRole: "ADMIN" }))
+    await expect(approveLegacyFullServicePricing({ marketCode: marketB.marketCode, actingUserId: adminA, actingRole: "ADMIN", rates: { tiers: { HALF: 32900 } } }))
       .rejects.toThrow(ForbiddenError);
   });
 
-  it("concurrent approvals of the same recommendation also conflict cleanly", async () => {
-    // A second guard beyond the duplicate test: a true race must not double-write.
-    const market = await makeMarket();
-    const admin = await makeAdmin("ADMIN", { marketId: market.id });
-    const rec = await makeRecommendation(market.marketCode);
-    const results = await Promise.allSettled([
-      approveMarketRecommendation({ recommendationId: rec.id, actingUserId: admin, actingRole: "ADMIN" }),
-      approveMarketRecommendation({ recommendationId: rec.id, actingUserId: admin, actingRole: "ADMIN" }),
-    ]);
-    const rejected = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toBeInstanceOf(Error); // ApprovalConflictError or RecommendationNotApprovedError
+  it("rejects an unauthorized role", async () => {
+    const market = await makeMarket({ junkPriceTable: { tiersCents: { HALF: 32900 } } });
+    const notAdmin = await makeAdmin("CUSTOMER", { platform: true });
+    await expect(approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: notAdmin, actingRole: "CUSTOMER", rates: { tiers: { HALF: 32900 } } }))
+      .rejects.toThrow(ApprovalForbiddenError);
   });
 });

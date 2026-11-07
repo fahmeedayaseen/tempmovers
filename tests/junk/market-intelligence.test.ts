@@ -17,7 +17,7 @@ import {
 } from "@/lib/junk/pricing";
 import { decideJunkAvailability } from "@/lib/junk/market-pricing";
 import {
-  applyApprovedRecommendationToTable, assertApprovable, stampLegacyFullServiceApproval,
+  applyApprovedRecommendationToTable, applyLegacyFullServiceRates, assertApprovable,
   RecommendationNotApprovedError, ApprovalForbiddenError, FloorOutOfDateError,
 } from "@/lib/junk/pricing-approval";
 import { COMPETITOR_OBSERVATIONS } from "@/lib/junk/seed-competitors";
@@ -265,15 +265,20 @@ describe("per-service-level pricing", () => {
     expect(resolveJunkPriceTable(override, "FULL_SERVICE").tiersCents.SINGLE_ITEM).toBe(17900);
   });
 
-  it("legacy top-level prices are NOT billable until blessed; once blessed they count as FULL_SERVICE only", () => {
+  it("legacy top-level prices are NEVER billable on their own; only explicit reviewed rates in the FS slot are", () => {
     const legacy: JunkPriceTableOverride = { tiersCents: { HALF: 32900 } };
-    // Unblessed: historical price in the DB is never assumed approved.
+    // Top-level alone: not billable, even for Full-Service (no blanket marker).
     expect(resolveApprovedJunkPrice(legacy, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
-    // Blessed via the controlled marker:
-    const blessed = stampLegacyFullServiceApproval(legacy, { approvedAt: new Date("2026-11-07"), approvedBy: "admin-1" });
-    expect(resolveApprovedJunkPrice(blessed, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(true);
+    // Explicitly approve the reviewed value into the FULL_SERVICE slot:
+    const approved = applyLegacyFullServiceRates(legacy, { tiers: { HALF: 32900 } });
+    expect(resolveApprovedJunkPrice(approved, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(true);
     // Still never Economy.
-    expect(resolveApprovedJunkPrice(blessed, "ECONOMY", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
+    expect(resolveApprovedJunkPrice(approved, "ECONOMY", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
+  });
+
+  it("legacy approval requires explicit reviewed rates (empty set is rejected)", () => {
+    expect(() => applyLegacyFullServiceRates({}, {})).toThrow(RecommendationNotApprovedError);
+    expect(() => applyLegacyFullServiceRates({}, { tiers: { HALF: -1 } })).toThrow(RecommendationNotApprovedError);
   });
 
   it("an unconfigured (service level, tier) is NOT approved — never billed from built-in defaults", () => {

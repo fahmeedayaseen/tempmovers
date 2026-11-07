@@ -162,14 +162,6 @@ export type JunkServiceLevelPriceOverride = {
  */
 export type JunkPriceTableOverride = JunkServiceLevelPriceOverride & {
   serviceLevels?: Partial<Record<JunkServiceLevelCode, JunkServiceLevelPriceOverride>>;
-  /**
-   * Set ONLY by the controlled legacy-approval procedure (correction round 4,
-   * item 2). Until it is stamped, the top-level (legacy) tiersCents/itemsCents
-   * are NOT billable — a historical price in the database is never assumed to
-   * have owner approval. Its presence is the documented approval evidence.
-   */
-  legacyFullServiceApprovedAt?: string;
-  legacyFullServiceApprovedBy?: string;
 };
 
 const junkServiceLevelPriceOverrideSchema = z.object({
@@ -181,8 +173,6 @@ const junkServiceLevelPriceOverrideSchema = z.object({
 
 export const junkPriceTableOverrideSchema = junkServiceLevelPriceOverrideSchema.extend({
   serviceLevels: z.record(z.enum(JUNK_SERVICE_LEVELS), junkServiceLevelPriceOverrideSchema).optional(),
-  legacyFullServiceApprovedAt: z.string().optional(),
-  legacyFullServiceApprovedBy: z.string().optional(),
 }).strict();
 
 /**
@@ -236,18 +226,14 @@ export function resolveApprovedJunkPrice(
   const o = parsed.data;
   const sl = o.serviceLevels?.[serviceLevel];
 
-  // Legacy top-level prices count as FULL_SERVICE ONLY when the controlled
-  // legacy-approval marker is present (correction: never assume historical
-  // prices were owner-approved).
-  const legacyApproved = serviceLevel === "FULL_SERVICE" && typeof o.legacyFullServiceApprovedAt === "string" && o.legacyFullServiceApprovedAt.length > 0;
-
-  /** A tier price is approved when set in this service level's layer, or legacy (if blessed). */
-  const tierApproved = (tier: JunkVolumeTierCode): boolean =>
-    typeof sl?.tiersCents?.[tier] === "number" || (legacyApproved && typeof o.tiersCents?.[tier] === "number");
-  const itemApproved = (code: JunkItemCode): boolean =>
-    typeof sl?.itemsCents?.[code] === "number" || (legacyApproved && typeof o.itemsCents?.[code] === "number");
-  const surchargeApproved = (code: JunkSpecialItemCode): boolean =>
-    typeof sl?.surchargesCents?.[code] === "number" || (legacyApproved && typeof o.surchargesCents?.[code] === "number");
+  // ONLY an explicit per-(service level) price counts as approved. Top-level
+  // "legacy" prices are never billable on their own — they must first be
+  // explicitly approved into a service-level slot by the controlled legacy
+  // procedure (which records the exact values), so default example prices can
+  // never be billed by blanket inheritance.
+  const tierApproved = (tier: JunkVolumeTierCode): boolean => typeof sl?.tiersCents?.[tier] === "number";
+  const itemApproved = (code: JunkItemCode): boolean => typeof sl?.itemsCents?.[code] === "number";
+  const surchargeApproved = (code: JunkSpecialItemCode): boolean => typeof sl?.surchargesCents?.[code] === "number";
 
   if (job.pricingMode === "VOLUME") {
     if (!job.volumeTier) return { approved: false, reason: "No volume tier on the request." };

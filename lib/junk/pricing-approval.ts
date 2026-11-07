@@ -1,6 +1,6 @@
 import {
   junkPriceTableOverrideSchema,
-  type JunkVolumeTierCode, type JunkPriceTableOverride, type JunkServiceLevelCode,
+  type JunkVolumeTierCode, type JunkPriceTableOverride, type JunkServiceLevelCode, type JunkItemCode,
 } from "@/lib/junk/pricing";
 
 // ---------------------------------------------------------------------------
@@ -89,18 +89,43 @@ export function applyApprovedRecommendationToTable(
   return { ...current, serviceLevels };
 }
 
+export type LegacyFullServiceRates = {
+  tiers?: Partial<Record<JunkVolumeTierCode, number>>;
+  items?: Partial<Record<JunkItemCode, number>>;
+};
+
 /**
- * Stamp the controlled legacy-approval marker onto a market's override
- * (correction: never assume historical prices were owner-approved). Returns a
- * NEW override; the stamp is the documented approval evidence that lets the
- * top-level legacy prices be read as FULL_SERVICE. Existing booking snapshots
- * are not touched — this only governs NEW quotes.
+ * Write the EXPLICIT legacy Full-Service rates an owner reviewed into the
+ * FULL_SERVICE service-level slot (correction round 5, item 2). This is not a
+ * blanket marker: the caller must pass the exact prices being authorized, each
+ * of which is validated and recorded, so default example prices can never be
+ * approved wholesale. Returns a NEW override; the ECONOMY slot and existing
+ * booking snapshots are untouched. Throws on an empty set or a non-positive price.
  */
-export function stampLegacyFullServiceApproval(
+export function applyLegacyFullServiceRates(
   current: JunkPriceTableOverride,
-  by: { approvedAt: Date; approvedBy: string },
+  rates: LegacyFullServiceRates,
 ): JunkPriceTableOverride {
-  return { ...current, legacyFullServiceApprovedAt: by.approvedAt.toISOString(), legacyFullServiceApprovedBy: by.approvedBy };
+  const tierEntries = Object.entries(rates.tiers ?? {}) as [JunkVolumeTierCode, number][];
+  const itemEntries = Object.entries(rates.items ?? {}) as [JunkItemCode, number][];
+  if (tierEntries.length === 0 && itemEntries.length === 0) {
+    throw new RecommendationNotApprovedError("No legacy rates were provided to approve; specify the exact reviewed prices.");
+  }
+  for (const [, cents] of [...tierEntries, ...itemEntries]) {
+    if (!Number.isInteger(cents) || cents <= 0) throw new RecommendationNotApprovedError("Legacy rates must be positive integer cents.");
+  }
+  const serviceLevels = { ...(current.serviceLevels ?? {}) };
+  const slot = serviceLevels.FULL_SERVICE ?? {};
+  const mergedTiers = { ...(slot.tiersCents ?? {}) } as Partial<Record<JunkVolumeTierCode, number>>;
+  for (const [tier, c] of tierEntries) mergedTiers[tier] = c;
+  const mergedItems = { ...(slot.itemsCents ?? {}) } as Partial<Record<JunkItemCode, number>>;
+  for (const [code, c] of itemEntries) mergedItems[code] = c;
+  serviceLevels.FULL_SERVICE = {
+    ...slot,
+    ...(tierEntries.length ? { tiersCents: mergedTiers } : {}),
+    ...(itemEntries.length ? { itemsCents: mergedItems } : {}),
+  };
+  return { ...current, serviceLevels };
 }
 
 /**

@@ -5,11 +5,28 @@ import { minimumAcceptablePriceCents } from "@/lib/junk/market-intelligence";
 import { requireMarketAccessByCode } from "@/lib/market-access";
 import type { JunkVolumeTierCode, JunkServiceLevelCode } from "@/lib/junk/pricing";
 import {
-  applyApprovedRecommendationToTable, assertApprovable, parseJunkPriceTableOverride, stampLegacyFullServiceApproval,
+  applyApprovedRecommendationToTable, applyLegacyFullServiceRates, assertApprovable, parseJunkPriceTableOverride,
   RecommendationNotApprovedError, RecommendationNotFoundError, ApprovalConflictError, MarketPolicyNotApprovedError,
   ApprovalForbiddenError,
-  type RecommendationStatusValue,
+  type RecommendationStatusValue, type LegacyFullServiceRates,
 } from "@/lib/junk/pricing-approval";
+
+/**
+ * Lock a market's PricingRule row for the rest of the transaction
+ * (SELECT ... FOR UPDATE). Both approval paths read-modify-write the single
+ * junkPriceTable JSON, so concurrent approvals of DIFFERENT tiers/service levels
+ * would otherwise clobber each other (lost update). The row lock serialises
+ * them: the second approval blocks until the first commits, then reads the
+ * already-updated table and merges its own slot, so every approved price is
+ * retained. Returns the freshly-read, locked rule.
+ */
+async function lockPricingRule(tx: TxClient, marketCode: string) {
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "PricingRule" WHERE "marketCode" = ${marketCode} FOR UPDATE`;
+  if (locked.length === 0) throw new RecommendationNotApprovedError(`Configure a PricingRule for ${marketCode} before approving a junk price.`);
+  const rule = await tx.pricingRule.findUnique({ where: { id: locked[0].id } });
+  if (!rule) throw new RecommendationNotApprovedError(`PricingRule for ${marketCode} disappeared mid-transaction.`);
+  return rule;
+}
 
 // ---------------------------------------------------------------------------
 // Owner/admin price approval — authenticated, atomic, audited (correction 2).
@@ -74,10 +91,9 @@ export async function approveMarketRecommendation(
       currentFloorCents,
     });
 
-    // The market must already have a PricingRule to approve a price into (it is
-    // the single authoritative source; we never spin up a parallel one here).
-    const rule = await tx.pricingRule.findUnique({ where: { marketCode: rec.marketCode } });
-    if (!rule) throw new RecommendationNotApprovedError(`Configure a PricingRule for ${rec.marketCode} before approving a junk price.`);
+    // Lock the market's PricingRule row so concurrent approvals of different
+    // tiers/service levels serialise instead of clobbering the shared JSON.
+    const rule = await lockPricingRule(tx, rec.marketCode);
 
     const nextTable = applyApprovedRecommendationToTable(parseJunkPriceTableOverride(rule.junkPriceTable), {
       status: "APPROVED", serviceLevel, volumeTier,
@@ -128,34 +144,54 @@ export async function approveMarketRecommendation(
 }
 
 // ---------------------------------------------------------------------------
-// Controlled legacy-pricing approval (correction item 2).
+// Controlled legacy-pricing approval (correction round 5, item 2).
 //
-// A market's pre-existing top-level junkPriceTable (tiersCents/itemsCents) is
-// NOT billable until an authorised admin, for THAT market, explicitly blesses
-// it. This stamps the documented approval marker + an audit entry in one
-// transaction. It does not change any price value or any existing booking
-// snapshot — it only records that the legacy Full-Service rates are approved.
+// A market's pre-existing top-level prices are never billable on their own. To
+// authorise them the admin passes the EXACT reviewed Full-Service rates; each
+// is validated (positive, at/above the current floor for volume tiers) and
+// written explicitly into the FULL_SERVICE service-level slot, with the approved
+// values + scope recorded in the audit log. There is no blanket marker, so
+// default example prices can never receive wholesale approval. Requires the
+// market's owner-approved payment policy and market authorisation. Existing
+// booking snapshots are untouched.
 // ---------------------------------------------------------------------------
 export async function approveLegacyFullServicePricing(
-  args: { marketCode: string; actingUserId: string; actingRole: UserRole },
-): Promise<{ marketCode: string; pricingRuleId: string; approvedAt: string }> {
-  if (!RECOMMENDATION_APPROVER_ROLES.includes(args.actingRole)) {
-    throw new ApprovalForbiddenError();
-  }
+  args: { marketCode: string; actingUserId: string; actingRole: UserRole; rates: LegacyFullServiceRates },
+): Promise<{ marketCode: string; pricingRuleId: string; approvedTiers: string[]; approvedItems: string[]; approvedAt: string }> {
+  if (!RECOMMENDATION_APPROVER_ROLES.includes(args.actingRole)) throw new ApprovalForbiddenError();
+
   return prisma.$transaction(async (tx: TxClient) => {
     await requireMarketAccessByCode({ userId: args.actingUserId, marketCode: args.marketCode });
-    const rule = await tx.pricingRule.findUnique({ where: { marketCode: args.marketCode } });
-    if (!rule) throw new RecommendationNotApprovedError(`No PricingRule for ${args.marketCode} to approve legacy pricing on.`);
+
+    // Require the market's own owner-approved payment policy (same bar as a
+    // normal price approval) and validate each reviewed tier against its floor.
+    const policy = await resolvePaymentPolicy(args.marketCode, tx);
+    if (policy.source !== "market" || policy.carlApprovedAt == null) throw new MarketPolicyNotApprovedError();
+
+    const tierEntries = Object.entries(args.rates.tiers ?? {}) as [JunkVolumeTierCode, number][];
+    for (const [tier, cents] of tierEntries) {
+      const floor = minimumAcceptablePriceCents({ tier, serviceLevel: "FULL_SERVICE", policy });
+      if (cents < floor) throw new RecommendationNotApprovedError(`Legacy ${tier} price $${(cents / 100).toFixed(2)} is below the current floor $${(floor / 100).toFixed(2)}.`);
+    }
+
+    const rule = await lockPricingRule(tx, args.marketCode);
+    const nextTable = applyLegacyFullServiceRates(parseJunkPriceTableOverride(rule.junkPriceTable), args.rates); // throws on empty / non-positive
+    await tx.pricingRule.update({ where: { id: rule.id }, data: { junkPriceTable: nextTable as Prisma.InputJsonValue, active: true } });
+
     const approvedAt = new Date();
-    const next = stampLegacyFullServiceApproval(parseJunkPriceTableOverride(rule.junkPriceTable), { approvedAt, approvedBy: args.actingUserId });
-    await tx.pricingRule.update({ where: { id: rule.id }, data: { junkPriceTable: next as Prisma.InputJsonValue } });
+    const approvedTiers = tierEntries.map(([t]) => t);
+    const approvedItems = (Object.keys(args.rates.items ?? {}));
     await tx.auditLog.create({
       data: {
         actorId: args.actingUserId, action: "JUNK_LEGACY_PRICING_APPROVED",
         entityType: "PricingRule", entityId: rule.id,
-        details: { marketCode: args.marketCode, actorRole: args.actingRole, authorizationDecision: "AUTHORIZED", approvedAt: approvedAt.toISOString() },
+        details: {
+          marketCode: args.marketCode, actorRole: args.actingRole, authorizationDecision: "AUTHORIZED",
+          serviceLevel: "FULL_SERVICE", approvedTiersCents: args.rates.tiers ?? {}, approvedItemsCents: args.rates.items ?? {},
+          policyApprovedAt: policy.carlApprovedAt?.toISOString() ?? null, approvedAt: approvedAt.toISOString(),
+        },
       },
     });
-    return { marketCode: args.marketCode, pricingRuleId: rule.id, approvedAt: approvedAt.toISOString() };
+    return { marketCode: args.marketCode, pricingRuleId: rule.id, approvedTiers, approvedItems, approvedAt: approvedAt.toISOString() };
   });
 }
