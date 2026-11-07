@@ -36,6 +36,20 @@ export type JunkLocationCode = (typeof JUNK_LOCATIONS)[number];
 export const JUNK_PRICING_MODES = ["VOLUME", "ITEMS"] as const;
 export type JunkPricingModeCode = (typeof JUNK_PRICING_MODES)[number];
 
+// Market Pricing Intelligence (Phase 1): the two service levels (directive §6).
+// ECONOMY is a budget curbside / easy-access pickup, a solo hauler where safe;
+// FULL_SERVICE is in-home removal, heavy items, stairs, larger loads and crews.
+export const JUNK_SERVICE_LEVELS = ["ECONOMY", "FULL_SERVICE"] as const;
+export type JunkServiceLevelCode = (typeof JUNK_SERVICE_LEVELS)[number];
+export const DEFAULT_JUNK_SERVICE_LEVEL: JunkServiceLevelCode = "FULL_SERVICE";
+
+/**
+ * Largest job (tier rank) that ECONOMY solo pickup may cover. Beyond a quarter
+ * truck a job needs a crew, so it is full-service only. A practicality/safety
+ * bound; admin-tunable thresholds are Phase 2.
+ */
+export const JUNK_ECONOMY_MAX_RANK = 2; // QUARTER
+
 export const JUNK_TIER_INFO: Record<JunkVolumeTierCode, { label: string; guide: string; baseHours: number }> = {
   SINGLE_ITEM: { label: "Single item", guide: "One bulky item, such as a sofa or a fridge", baseHours: 1 },
   EIGHTH: { label: "1/8 truck", guide: "About 2–3 cubic yards: a few pieces of furniture", baseHours: 1 },
@@ -170,6 +184,8 @@ export type JunkQuoteInput = {
   specialItems: JunkSpecialItemCode[];
   itemLocation: JunkLocationCode;
   hasHeavyItems: boolean;
+  /** Market Pricing Intelligence (Phase 1). Defaults to FULL_SERVICE; ECONOMY forces a solo crew and must pass eligibility. */
+  serviceLevel?: JunkServiceLevelCode;
 };
 
 export type JunkQuoteLine = { label: string; cents: number };
@@ -177,6 +193,7 @@ export type JunkQuoteLine = { label: string; cents: number };
 export type JunkQuote = {
   feeModel: typeof JUNK_FEE_MODEL;
   pricingMode: JunkPricingModeCode;
+  serviceLevel: JunkServiceLevelCode;
   servicePriceCents: number;
   surchargesCents: number;
   allInCents: number;
@@ -214,6 +231,18 @@ export function isHardJob(input: Pick<JunkQuoteInput, "itemLocation" | "hasHeavy
   return input.hasHeavyItems
     || input.itemLocation === "BASEMENT" || input.itemLocation === "UPSTAIRS"
     || input.specialItems.includes("PIANO") || input.specialItems.includes("HOT_TUB");
+}
+
+/**
+ * Whether a job may be booked as ECONOMY (solo curbside pickup). Easy-access
+ * curbside, nothing heavy/stairs/piano/hot-tub, and no larger than a quarter
+ * truck. This is the guard that stops a full-service job being silently
+ * downgraded to a cheaper solo price (directive §6).
+ */
+export function junkEconomyEligible(input: Pick<JunkQuoteInput, "itemLocation" | "hasHeavyItems" | "specialItems" | "pricingMode" | "volumeTier" | "items">): boolean {
+  if (input.itemLocation !== "CURBSIDE") return false;
+  if (isHardJob(input)) return false;
+  return sizeRank(input) <= JUNK_ECONOMY_MAX_RANK;
 }
 
 /**
@@ -280,7 +309,16 @@ export function calculateJunkQuote(input: JunkQuoteInput): JunkQuote {
   const crewPoolCents = allInCents - platformTakeCents;
 
   const rank = sizeRank(input);
-  const helpersRequired = junkHelpersRequired({ ...input, rank });
+  const serviceLevel = input.serviceLevel ?? DEFAULT_JUNK_SERVICE_LEVEL;
+  // ECONOMY is a solo curbside pickup and must pass eligibility; we never
+  // silently downgrade a full-service job or drop a required worker to hit a
+  // cheaper price (directive §6). FULL_SERVICE keeps the existing crew logic,
+  // so every pre-existing booking (which defaults to FULL_SERVICE) prices
+  // exactly as before.
+  if (serviceLevel === "ECONOMY" && !junkEconomyEligible(input)) {
+    throw new JunkQuoteError("Economy pickup isn't available for this job — it needs full-service (in-home, heavy items, stairs, or a larger load).");
+  }
+  const helpersRequired = serviceLevel === "ECONOMY" ? 0 : junkHelpersRequired({ ...input, rank });
   const helperShareCents = helpersRequired > 0 ? Math.floor((crewPoolCents * input.helperSharePercent) / 100) : 0;
   // The hauler takes the remainder, so rounding never loses or invents a cent.
   const haulerShareCents = crewPoolCents - helperShareCents * helpersRequired;
@@ -292,6 +330,7 @@ export function calculateJunkQuote(input: JunkQuoteInput): JunkQuote {
   return {
     feeModel: JUNK_FEE_MODEL,
     pricingMode: input.pricingMode,
+    serviceLevel,
     servicePriceCents,
     surchargesCents,
     allInCents,

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [feature/model-b-pricing]
+    branches: [feature/model-b-pricing, feature/market-pricing-intelligence]
   pull_request:
     branches: [staging-integration]
 

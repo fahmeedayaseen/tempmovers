@@ -22,6 +22,7 @@ export type JunkQuotePlan = {
   model: typeof JUNK_ALLOCATION_MODEL;
   policyVersion: string;
   marketCode: string;
+  serviceLevel: JunkQuote["serviceLevel"];
   basePriceCents: number;
   helperGrossUpCents: number;
   floorAdjustmentCents: number;
@@ -51,6 +52,7 @@ export type JunkQuotePlan = {
 
 export type PublicJunkQuote = {
   pricingMode: JunkQuote["pricingMode"];
+  serviceLevel: JunkQuote["serviceLevel"];
   servicePriceCents: number;
   surchargesCents: number;
   allInCents: number;
@@ -102,6 +104,7 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
     model: JUNK_ALLOCATION_MODEL,
     policyVersion: PAYMENT_POLICY_VERSION,
     marketCode: policy.marketCode,
+    serviceLevel: base.serviceLevel,
     basePriceCents: base.allInCents,
     helperGrossUpCents: allocation.helperGrossUpCents,
     floorAdjustmentCents: allocation.floorAdjustmentCents,
@@ -130,6 +133,7 @@ export function buildJunkFullQuote(input: JunkQuoteInput, policy: ResolvedPaymen
 
   const publicQuote: PublicJunkQuote = {
     pricingMode: base.pricingMode,
+    serviceLevel: base.serviceLevel,
     servicePriceCents: base.servicePriceCents,
     surchargesCents: base.surchargesCents,
     allInCents: allocation.allInCents,

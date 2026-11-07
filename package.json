@@ -14,6 +14,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:backfill-geo": "tsx prisma/backfill-geo.ts",
+    "prisma:seed-competitors": "tsx prisma/seed-competitors.ts",
     "smoke-test": "tsx scripts/smoke-test.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
     "db:migrate-production": "node scripts/migrate-production.mjs",

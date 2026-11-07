@@ -169,6 +169,16 @@ enum JunkCrewRole {
   HELPER
 }
 
+// Market Pricing Intelligence (Phase 1, 7 Nov 2026). Two distinguishable junk
+// services (directive §6). ECONOMY is a budget curbside / easy-access pickup,
+// typically a solo hauler where safe; FULL_SERVICE is in-home removal, heavy
+// items, stairs and crews. Existing bookings default to FULL_SERVICE so their
+// original pricing and settlement records are untouched.
+enum JunkServiceLevel {
+  ECONOMY
+  FULL_SERVICE
+}
+
 enum JobStatus {
   DRAFT
   POSTED
@@ -1921,6 +1931,10 @@ model JunkRemovalDetail {
   itemNotes             String?
   itemLocation          JunkItemLocation
   hasHeavyItems         Boolean          @default(false)
+  // Market Pricing Intelligence (Phase 1): the booked service level. Defaults
+  // to FULL_SERVICE so every pre-existing booking keeps its original pricing
+  // and settlement; ECONOMY is only set where the job is eligibility-validated.
+  serviceLevel          JunkServiceLevel @default(FULL_SERVICE)
   specialItems          String[]         @default([])
   // Private storage keys only, never URLs. Customer photos at booking; crew
   // photos before and after the haul; the dump receipt as proof of proper
@@ -3820,4 +3834,124 @@ model WaitlistSignup {
   @@unique([email, audience]) // one email may join BOTH lists, once each
   @@index([audience])
   @@index([zipCode])
+}
+
+// ============================================================================
+// Market Pricing Intelligence — Phase 1 (7 November 2026)
+//
+// An enhancement layer on top of Model B. It does NOT introduce a second
+// pricing or payment engine and it does NOT bill. Competitor observations are
+// reference data; recommendations are PROPOSALS that stay separate from
+// approved rates until an admin writes them into the existing pricing system
+// (PricingRule), which remains the single authoritative junk price source read
+// by resolveJunkMarketPricing(). Additive only — no existing model, enum,
+// column or index is modified or dropped.
+// ============================================================================
+
+// How a competitor advertises a price. Only like-for-like bases are compared
+// (directive §3): a curbside single-item rate never benchmarks a full-service
+// in-home job.
+enum CompetitorPricingBasis {
+  ITEM
+  VOLUME
+  TRUCKLOAD
+  HOURLY
+}
+
+// The competitor's service shape, mapped to our JunkServiceLevel at compare
+// time. SPECIALIZED (e.g. hot-tub, piano) is never used as a general benchmark.
+enum CompetitorServiceType {
+  CURBSIDE
+  FULL_SERVICE
+  SPECIALIZED
+}
+
+// Confidence in an observation, set by the reviewer who recorded it. LOW and
+// stale observations are excluded from automatic benchmarking.
+enum BenchmarkConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// A market price recommendation is a proposal only. It is never a live price
+// until an admin APPROVES it and the approval is written into PricingRule.
+enum MarketPriceRecommendationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+// A single, manually collected and verified competitor price point (Phase 1:
+// no scraping; scheduled collection is Phase 2). Each row carries its source
+// URL and observation date so freshness and provenance are auditable. National
+// estimates must be recorded with LOW confidence and are not treated as
+// verified local quotes (directive §3, owner authorization §2).
+model CompetitorObservation {
+  id                      String                @id @default(cuid())
+  marketCode              String
+  zipCode                 String?
+  competitor              String
+  sourceUrl               String
+  observedAt              DateTime
+  serviceType             CompetitorServiceType
+  pricingBasis            CompetitorPricingBasis
+  // Comparable load descriptor for VOLUME/TRUCKLOAD bases: a JunkVolumeTier
+  // code string (e.g. "SINGLE_ITEM", "HALF"). Null for ITEM/HOURLY bases.
+  comparableTier          String?
+  truckCapacityCubicYards Int?
+  includesLabor           Boolean               @default(true)
+  includesDisposal        Boolean               @default(true)
+  includesStairs          Boolean               @default(false)
+  minimumChargeCents      Int?
+  advertisedPriceCents    Int
+  additionalItemCents     Int?
+  conditions              String?
+  confidence              BenchmarkConfidence   @default(MEDIUM)
+  // Soft freshness TTL; actual staleness is derived from observedAt at read.
+  staleAfterDays          Int                   @default(30)
+  active                  Boolean               @default(true)
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  @@index([marketCode, serviceType, observedAt])
+  @@index([marketCode, active])
+}
+
+// The engine's output for a (market, service level, tier): a recommended
+// all-inclusive price, the computed cost floor, and the competitive target it
+// was derived from. Stored for admin review; APPROVING one writes the price
+// into PricingRule (the existing pricing system) — this table never bills.
+model MarketPriceRecommendation {
+  id                     String                          @id @default(cuid())
+  marketCode             String
+  serviceLevel           JunkServiceLevel
+  volumeTier             JunkVolumeTier
+  // Engine output — a PROPOSAL, never a live customer price.
+  recommendedPriceCents  Int
+  // The minimum economically acceptable price (Model B floor: hauler minimum +
+  // truck allowance + internal disposal estimate, grossed up for the fee).
+  floorPriceCents        Int
+  // Competitive target (benchmark × (1 − discount)); null when no valid
+  // comparable benchmark existed and the approved rate was retained.
+  competitiveTargetCents Int?
+  discountBps            Int?
+  benchmarkPriceCents    Int?
+  benchmarkCompetitor    String?
+  benchmarkObservationId String?
+  // Why the engine produced this (floor-held, benchmark-undercut, no-data…).
+  rationale              String?
+  status                 MarketPriceRecommendationStatus @default(PENDING)
+  // Approval trail, kept separate from PricingRule. approvedRateWrittenAt is
+  // set only when an admin pushes the approved price into the pricing system.
+  reviewedByUserId       String?
+  reviewedAt             DateTime?
+  approvedRateWrittenAt  DateTime?
+  effectiveAt            DateTime?
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+
+  @@index([marketCode, serviceLevel, volumeTier, status], map: "MarketPriceRecommendation_lookup_idx")
+  @@index([status])
 }
