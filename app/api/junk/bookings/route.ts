@@ -106,7 +106,7 @@ export async function POST(request: Request) {
   const availability = await resolveJunkMarketAvailability(market.marketCode, {
     serviceLevel: input.details.serviceLevel,
     pricingMode: input.details.pricingMode,
-    volumeTier: input.details.pricingMode === "VOLUME" ? input.details.volumeTier : null,
+    volumeTier: input.details.pricingMode === "VOLUME" ? (input.details.volumeTier ?? null) : null,
   });
   if (availability.state !== "AVAILABLE") {
     return NextResponse.json({ error: availability.reason, code: availability.code, state: availability.state }, { status: 409 });
