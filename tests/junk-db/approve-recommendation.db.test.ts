@@ -190,11 +190,28 @@ describe.skipIf(!HAS_DB)("approveLegacyFullServicePricing (DB, explicit reviewed
     expect((audit!.details as unknown as { approvedTiersCents?: { HALF?: number } }).approvedTiersCents?.HALF).toBe(32900);
   });
 
-  it("rejects a reviewed rate below the current floor", async () => {
+  it("rejects a reviewed tier rate below the current floor", async () => {
     const market = await makeMarket({ junkPriceTable: { tiersCents: { HALF: 32900 } } });
     const admin = await makeAdmin("ADMIN", { marketId: market.id });
     await expect(approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN", rates: { tiers: { HALF: 1000 } } }))
       .rejects.toThrow(RecommendationNotApprovedError);
+  });
+
+  it("rejects an individually approved ITEM price below the single-item operating floor (round 6, item 1)", async () => {
+    const market = await makeMarket();
+    const admin = await makeAdmin("ADMIN", { marketId: market.id });
+    // A $50 item is below the full-service single-item floor; must be rejected.
+    await expect(approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN", rates: { items: { SOFA: 5000 } } }))
+      .rejects.toThrow(RecommendationNotApprovedError);
+  });
+
+  it("accepts an ITEM price at or above the single-item floor and makes it billable", async () => {
+    const market = await makeMarket();
+    const admin = await makeAdmin("ADMIN", { marketId: market.id });
+    const itemFloor = await floorFor(market.marketCode, "FULL_SERVICE", "SINGLE_ITEM");
+    await approveLegacyFullServicePricing({ marketCode: market.marketCode, actingUserId: admin, actingRole: "ADMIN", rates: { items: { SOFA: itemFloor } } });
+    const rule = await prisma.pricingRule.findUnique({ where: { marketCode: market.marketCode } });
+    expect(resolveApprovedJunkPrice(rule!.junkPriceTable, "FULL_SERVICE", { pricingMode: "ITEMS", volumeTier: null, items: ["SOFA"] }).approved).toBe(true);
   });
 
   it("rejects when the market has no owner-approved payment policy", async () => {

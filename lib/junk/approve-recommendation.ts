@@ -3,7 +3,7 @@ import { Prisma, type UserRole } from "@prisma/client";
 import { resolvePaymentPolicy } from "@/lib/payments/policy";
 import { minimumAcceptablePriceCents } from "@/lib/junk/market-intelligence";
 import { requireMarketAccessByCode } from "@/lib/market-access";
-import type { JunkVolumeTierCode, JunkServiceLevelCode } from "@/lib/junk/pricing";
+import type { JunkVolumeTierCode, JunkServiceLevelCode, JunkItemCode } from "@/lib/junk/pricing";
 import {
   applyApprovedRecommendationToTable, applyLegacyFullServiceRates, assertApprovable, parseJunkPriceTableOverride,
   RecommendationNotApprovedError, RecommendationNotFoundError, ApprovalConflictError, MarketPolicyNotApprovedError,
@@ -172,6 +172,19 @@ export async function approveLegacyFullServicePricing(
     for (const [tier, cents] of tierEntries) {
       const floor = minimumAcceptablePriceCents({ tier, serviceLevel: "FULL_SERVICE", policy });
       if (cents < floor) throw new RecommendationNotApprovedError(`Legacy ${tier} price $${(cents / 100).toFixed(2)} is below the current floor $${(floor / 100).toFixed(2)}.`);
+    }
+
+    // Final pricing safeguard (round 6, item 1): individually approved ITEM
+    // prices are checked against the operating-cost/payout floor too, just like
+    // tier prices. The applicable floor is the minimum all-in for a single-item
+    // job at this service level — an item priced below it could never be
+    // profitable as a standalone pickup, so it is never made billable.
+    const itemEntriesForFloor = Object.entries(args.rates.items ?? {}) as [JunkItemCode, number][];
+    if (itemEntriesForFloor.length > 0) {
+      const itemFloor = minimumAcceptablePriceCents({ tier: "SINGLE_ITEM", serviceLevel: "FULL_SERVICE", policy });
+      for (const [code, cents] of itemEntriesForFloor) {
+        if (cents < itemFloor) throw new RecommendationNotApprovedError(`Legacy item ${code} price $${(cents / 100).toFixed(2)} is below the single-item operating floor $${(itemFloor / 100).toFixed(2)}.`);
+      }
     }
 
     const rule = await lockPricingRule(tx, args.marketCode);
