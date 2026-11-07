@@ -17,16 +17,16 @@ import { captureIntegrationAlert } from "@/lib/monitoring";
 //
 //   * moving and other hourly jobs: final amount from the approved hours;
 //     anything collected and unused is refunded in full;
-//   * junk: the full allocation (lib/junk/allocation.ts) — unused helper time
-//     and unused disposal refunded, the hauler and helpers paid, the platform
-//     fee on the service subtotal, disposal reimbursed against the receipt.
+//   * junk (MODEL B, lib/junk/allocation.ts): the customer paid ONE flat price.
+//     Helpers are paid for actual time, the hauler takes the residual, the
+//     platform fee is on the FULL price. Disposal is internal — NOT reimbursed,
+//     NOT refunded. An underfunded job HOLDS instead of settling (no negative row).
 //
 // Every collected cent is written to one PaymentAllocation row, and the rows
 // must sum to what was collected before anything is saved. One settlement per
 // job (unique key); a second call only retries refunds that did not go
 // through. Worker payouts created at approval are PENDING until settlement
-// sets their final amount and releases them (SCHEDULED); a disposal
-// reimbursement waits for its receipt and is transferred on its own.
+// sets their final amount and releases them (SCHEDULED).
 // ---------------------------------------------------------------------------
 
 export class SettlementError extends Error {
@@ -114,52 +114,50 @@ export async function settleJob(jobId: string, actorUserId: string): Promise<Set
 
     const paidOrders = await prisma.changeOrder.findMany({ where: { entityType: "JOB", entityId: jobId, status: "PAID" } });
     let fundedAllIn = plan.allInCents;
-    let allowance = plan.disposalCents;
-    let fundedHelper = plan.helperTotalCents;
     for (const co of paidOrders) {
-      const p = (co.plan ?? {}) as { allInDeltaCents?: number; disposalDeltaCents?: number; helperCompDeltaCents?: number };
+      const p = (co.plan ?? {}) as { allInDeltaCents?: number };
       fundedAllIn += p.allInDeltaCents ?? co.deltaCents;
-      allowance += p.disposalDeltaCents ?? 0;
-      fundedHelper += p.helperCompDeltaCents ?? 0;
     }
 
+    // Model B: disposal is an INTERNAL estimate. The documented actual (from the
+    // receipt) is recorded for admin margin reporting only — it never changes a
+    // payout or creates a refund. Captured here for the settlement details.
     const disposal = await prisma.disposalExpense.findUnique({ where: { jobId } });
-    let approvedDisposal: number | null = null;
-    if (disposal?.state === "APPROVED") approvedDisposal = disposal.actualCents ?? 0;
-    if (disposal?.state === "REJECTED") approvedDisposal = 0;
+    const actualDisposalCents = disposal?.state === "APPROVED" ? (disposal.actualCents ?? null) : null;
 
     const helpers = billable.filter((a) => a.junkCrewRole === "HELPER" && a.status === "APPROVED").sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     const result = settleJunk({
       fundedAllInCents: fundedAllIn,
-      disposalAllowanceCents: allowance,
-      fundedHelperCompCents: fundedHelper,
       actualHelperMinutes: helpers.map((h) => Math.round(Number(h.actualHours ?? 0) * 60)),
-      approvedDisposalCents: approvedDisposal,
+      actualDisposalCents,
       bookingProtectionCents: plan.bookingProtectionCents,
-      policy: { platformFeeBps: plan.platformFeeBps, helperHourlyCents: plan.helperHourlyCents, helperMinimumMinutes: plan.helperMinimumMinutes, helperIncrementMinutes: plan.helperIncrementMinutes },
+      policy: { platformFeeBps: plan.platformFeeBps, helperHourlyCents: plan.helperHourlyCents, helperMinimumMinutes: plan.helperMinimumMinutes, helperIncrementMinutes: plan.helperIncrementMinutes, haulerFloorCents: plan.haulerFloorCents },
     });
+    // BLOCKER (review §4): an underfunded job is HELD, never settled with a negative row.
+    if (result.requiresHold) {
+      throw new SettlementError(`This junk job cannot be auto-settled: ${result.exceptions.join(" ")} Resolve funding/liability (change order or exception) and retry.`, 409);
+    }
     if (!creditTerms && result.collectedCents !== collectedCents) {
       throw new SettlementError(`Collected funds (${collectedCents} cents) do not match the funded scope (${result.collectedCents} cents). Reconcile the payments by hand before settling.`);
     }
     exceptions.push(...result.exceptions);
 
     for (const r of result.rows) {
-      if (r.recipient === "HAULER") rows.push({ recipient: "HAULER", amountCents: r.amountCents, workerId: hauler.workerId, assignmentId: hauler.id, state: "RELEASED", basis: { rule: "subtotal − platform fee − helper pay", subtotalCents: result.subtotalCents, platformFeeCents: result.platformFeeCents, helperChargedCents: result.helperChargedCents } });
+      if (r.recipient === "HAULER") rows.push({ recipient: "HAULER", amountCents: r.amountCents, workerId: hauler.workerId, assignmentId: hauler.id, state: "RELEASED", basis: { rule: "full price − platform fee − helper pay", fullPriceCents: fundedAllIn, platformFeeCents: result.platformFeeCents, helperTotalCents: result.helperTotalCents } });
       else if (r.recipient === "HELPER") {
         const h = helpers[r.helperIndex ?? 0];
         rows.push({ recipient: "HELPER", amountCents: r.amountCents, workerId: h.workerId, assignmentId: h.id, state: "RELEASED", basis: { rule: "hourly × payable time", hourlyCents: plan.helperHourlyCents, payableMinutes: result.helperPayableMinutes[r.helperIndex ?? 0], minimumMinutes: plan.helperMinimumMinutes, incrementMinutes: plan.helperIncrementMinutes } });
-      } else if (r.recipient === "DISPOSAL") rows.push({ recipient: "DISPOSAL", amountCents: r.amountCents, workerId: hauler.workerId, assignmentId: null, state: r.held ? "HELD" : "APPROVED_AWAITING_FUNDS", basis: { allowanceCents: allowance, approvedCents: approvedDisposal, receipt: disposal?.receiptKey ? "on file" : "missing" } });
-      else if (r.recipient === "CUSTOMER_REFUND") rows.push({ recipient: "CUSTOMER_REFUND", amountCents: r.amountCents, state: "APPROVED_AWAITING_FUNDS", basis: { unusedHelperCents: result.helperUnusedRefundCents, unusedDisposalCents: result.disposalRefundCents } });
-      else if (r.recipient === "PLATFORM") rows.push({ recipient: "PLATFORM", amountCents: r.amountCents, state: "RETAINED", basis: { feeBps: plan.platformFeeBps, feeBasisCents: result.subtotalCents, helperExcessCents: result.helperExcessCents, haulerShortfallCents: result.haulerShortfallCents } });
+      } else if (r.recipient === "PLATFORM") rows.push({ recipient: "PLATFORM", amountCents: r.amountCents, state: "RETAINED", basis: { feeBps: plan.platformFeeBps, feeBasisCents: fundedAllIn, haulerShortfallCents: result.haulerShortfallCents } });
       else rows.push({ recipient: "PROTECTION", amountCents: r.amountCents, state: "RETAINED" });
     }
-    // Helpers who worked but whose seat was never approved are not billable yet.
-    refundCents = result.refundCents;
-    finalTotalCents = result.collectedCents - result.refundCents;
+    // Model B: no DISPOSAL reimbursement row and no routine CUSTOMER_REFUND.
+    // Legal/cancellation/service-failure refunds are handled by the separate refunds flow.
+    refundCents = 0;
+    finalTotalCents = result.collectedCents;
     platformFeeCents = result.platformFeeCents;
-    feeBasisCents = result.subtotalCents;
+    feeBasisCents = fundedAllIn;
     feeBps = plan.platformFeeBps;
-    details = { model: plan.model, quoteVersion: quote?.version ?? null, paidChangeOrders: paidOrders.map((c) => ({ id: c.id, kind: c.kind, deltaCents: c.deltaCents })), settlement: result as unknown as Prisma.InputJsonValue };
+    details = { model: plan.model, quoteVersion: quote?.version ?? null, actualDisposalCents, paidChangeOrders: paidOrders.map((c) => ({ id: c.id, kind: c.kind, deltaCents: c.deltaCents })), settlement: result as unknown as Prisma.InputJsonValue };
   } else {
     // ---- moving and other hourly services --------------------------------
     const preview = await calculateJobFinalCaptureAmount(prisma, job);
@@ -239,38 +237,24 @@ export async function settleJob(jobId: string, actorUserId: string): Promise<Set
 }
 
 /**
- * A disposal receipt reviewed after the job was settled: the reimbursement
- * becomes the approved amount (never more than the allowance) and any unused
- * allowance is refunded to the customer in full. The hauler's service
- * earnings and the platform fee do not move — disposal is outside the fee base.
+ * MODEL B (2 Nov 2026): disposal is an INTERNAL estimate. A reviewed disposal
+ * receipt is recorded for admin margin reporting and lawful-handling compliance,
+ * but it NEVER reimburses the hauler and NEVER refunds the customer — there is
+ * no DISPOSAL allocation row and no routine disposal refund to apply. This
+ * function now only logs the review and returns a zero money movement, so its
+ * existing callers (the disposal-receipt endpoints) keep working.
+ *
+ * Legally required refunds (cancellation, service failure) are unaffected and
+ * go through the separate refunds flow, not here.
  */
 export async function applyDisposalReview(jobId: string, actorUserId: string): Promise<{ refund: PolicyRefundResult | null; reimbursedCents: number } | null> {
   const settlement = await prisma.paymentSettlement.findUnique({ where: { entityType_entityId: { entityType: "JOB", entityId: jobId } } });
   if (!settlement) return null;
   const disposal = await prisma.disposalExpense.findUnique({ where: { jobId } });
   if (!disposal || (disposal.state !== "APPROVED" && disposal.state !== "REJECTED")) return null;
-  const row = await prisma.paymentAllocation.findFirst({ where: { settlementId: settlement.id, recipient: "DISPOSAL" } });
-  if (!row || row.state === "TRANSFERRED") return null;
-
-  const allowance = row.amountCents;
-  const approved = disposal.state === "APPROVED" ? Math.min(disposal.actualCents ?? 0, allowance) : 0;
-  const unused = allowance - approved;
-  await prisma.$transaction(async (tx) => {
-    await tx.paymentAllocation.update({ where: { id: row.id }, data: { amountCents: approved, state: approved > 0 ? "APPROVED_AWAITING_FUNDS" : "REFUNDED", basis: { allowanceCents: allowance, approvedCents: approved, reviewedAt: new Date().toISOString() } } });
-    if (unused > 0) {
-      await tx.paymentAllocation.create({ data: { settlementId: settlement.id, entityType: "JOB", entityId: jobId, recipient: "CUSTOMER_REFUND", amountCents: unused, state: "APPROVED_AWAITING_FUNDS", basis: { rule: "unused disposal allowance after receipt review" } } });
-      await tx.paymentSettlement.update({ where: { id: settlement.id }, data: { refundCents: { increment: unused }, finalTotalCents: { decrement: unused } } });
-    }
-    await tx.auditLog.create({ data: { actorId: actorUserId, jobId, action: "DISPOSAL_SETTLED", entityType: "Job", entityId: jobId, details: { allowanceCents: allowance, approvedCents: approved, refundCents: unused } } });
-  });
-  let refund: PolicyRefundResult | null = null;
-  if (unused > 0) {
-    refund = await refundCollectedFunds({ ref: { type: "JOB", id: jobId }, amountCents: unused, reason: "Unused disposal allowance returned after the dump receipt", purposeKey: `disposal:${disposal.id}`, actorUserId });
-    if (refund.refundedCents >= unused) {
-      await prisma.paymentAllocation.updateMany({ where: { settlementId: settlement.id, recipient: "CUSTOMER_REFUND", basis: { path: ["rule"], equals: "unused disposal allowance after receipt review" } }, data: { state: "REFUNDED" } });
-    }
-  }
-  return { refund, reimbursedCents: approved };
+  // Record-only: capture the documented actual for margin/compliance; no payout, no refund.
+  await prisma.auditLog.create({ data: { actorId: actorUserId, jobId, action: "DISPOSAL_REVIEWED", entityType: "Job", entityId: jobId, details: { actualCents: disposal.actualCents ?? null, state: disposal.state, note: "Model B: internal disposal — recorded for margin only, no reimbursement or refund." } } });
+  return { refund: null, reimbursedCents: 0 };
 }
 
 // ---------------------------------------------------------------------------

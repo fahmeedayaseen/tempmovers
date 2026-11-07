@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
-  JUNK_ITEM_CATEGORY_CODES, JUNK_ITEM_CODES, JUNK_LOCATIONS, JUNK_PRICING_MODES, JUNK_SPECIAL_ITEM_CODES,
-  JUNK_VOLUME_TIERS, MAX_JUNK_ITEM_QUANTITY,
+  JUNK_ITEM_CATEGORY_CODES, JUNK_ITEM_CODES, JUNK_LOCATIONS, JUNK_PRICING_MODES, JUNK_SERVICE_LEVELS,
+  JUNK_SPECIAL_ITEM_CODES, JUNK_VOLUME_TIERS, MAX_JUNK_ITEM_QUANTITY, DEFAULT_JUNK_SERVICE_LEVEL,
 } from "@/lib/junk/pricing";
 
 // Junk removal — VASRUE Digital Media, 28 October 2026. The job-details shape
@@ -18,6 +18,7 @@ export const junkJobDetailsSchema = z.object({
   specialItems: z.array(z.enum(JUNK_SPECIAL_ITEM_CODES)).max(JUNK_SPECIAL_ITEM_CODES.length).default([]),
   itemLocation: z.enum(JUNK_LOCATIONS),
   hasHeavyItems: z.boolean().default(false),
+  serviceLevel: z.enum(JUNK_SERVICE_LEVELS).default(DEFAULT_JUNK_SERVICE_LEVEL),
 }).superRefine((v, ctx) => {
   if (v.pricingMode === "VOLUME" && !v.volumeTier) ctx.addIssue({ code: "custom", path: ["volumeTier"], message: "Choose how much there is to haul." });
   if (v.pricingMode === "ITEMS" && !(v.items && v.items.length > 0)) ctx.addIssue({ code: "custom", path: ["items"], message: "Add at least one item." });

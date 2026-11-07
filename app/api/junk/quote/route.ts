@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { JunkQuoteError } from "@/lib/junk/pricing";
-import { findJunkMarketForZip } from "@/lib/junk/market-pricing";
+import { findJunkMarketForZip, resolveJunkMarketAvailability } from "@/lib/junk/market-pricing";
 import { quoteJunkForMarket } from "@/lib/junk/full-quote";
 import { JunkAllocationError } from "@/lib/junk/allocation";
 import { junkJobDetailsSchema } from "@/lib/junk/request-schema";
@@ -31,6 +31,20 @@ export async function POST(request: Request) {
   const market = await findJunkMarketForZip(parsed.data.postalCode);
   if (!market) {
     return NextResponse.json({ error: "Junk removal isn't available in this area yet.", code: "JUNK_NOT_AVAILABLE" }, { status: 409 });
+  }
+
+  // Market Pricing Intelligence (Phase 1): never quote from unapproved example
+  // amounts. An unapproved market routes to MANUAL_REVIEW instead of a price.
+  const d = parsed.data.details;
+  const availability = await resolveJunkMarketAvailability(market.marketCode, {
+    serviceLevel: d.serviceLevel,
+    pricingMode: d.pricingMode,
+    volumeTier: d.pricingMode === "VOLUME" ? (d.volumeTier ?? null) : null,
+    items: d.pricingMode === "ITEMS" ? (d.items ?? []).map((i) => i.code) : [],
+    specialItems: d.specialItems ?? [],
+  });
+  if (availability.state !== "AVAILABLE") {
+    return NextResponse.json({ error: availability.reason, code: availability.code, state: availability.state }, { status: 409 });
   }
 
   try {

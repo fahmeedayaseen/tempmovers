@@ -68,6 +68,12 @@ export function resolveFromRow(row: ConfigRow | null, marketCode: string, source
     helperHourlyCents: row?.helperHourlyCents ?? d.helperHourlyCents,
     helperMinimumMinutes: row?.helperMinimumMinutes ?? d.helperMinimumMinutes,
     helperIncrementMinutes: row?.helperIncrementMinutes ?? d.helperIncrementMinutes,
+    // Model B: max customer-selectable helpers and how many are already baked
+    // into the base tier price (0 = base is a solo price, every helper grossed in).
+    // From defaults until the admin-wage migration adds maxHelpers/includedHelperCount
+    // columns to PaymentPolicyConfig (see admin-controls slice).
+    maxHelpers: d.maxHelpers,
+    includedHelperCount: d.includedHelperCount,
     haulerFloorCents: row?.haulerFloorCents ?? d.haulerFloorCents,
     truckAllowanceCents: row?.truckAllowanceCents ?? d.truckAllowanceCents,
     disposalEstimatesCents: mergeRecord(d.disposalEstimatesCents, row?.disposalEstimatesCents),

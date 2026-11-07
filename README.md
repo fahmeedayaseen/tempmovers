@@ -1,5 +1,7 @@
 # TempMovers.com Full-Stack Starter
 
+[![CI](https://github.com/fahmeedayaseen/tempmovers/actions/workflows/ci.yml/badge.svg?branch=feature/model-b-pricing)](https://github.com/fahmeedayaseen/tempmovers/actions/workflows/ci.yml)
+
 A production-oriented Next.js, Prisma, PostgreSQL, and Stripe starter for a nationwide hourly moving-labor and commercial-driver marketplace.
 
 ## Included portals

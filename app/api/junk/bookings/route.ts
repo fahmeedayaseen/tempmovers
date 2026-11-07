@@ -7,7 +7,7 @@ import { geocodeAddress, GeocodingNotConfiguredError } from "@/lib/geocoding";
 import { queueNotification } from "@/lib/notifications";
 import { bookingConfirmationTemplate } from "@/lib/email/templates/booking";
 import { JunkQuoteError, JUNK_TIER_INFO } from "@/lib/junk/pricing";
-import { findJunkMarketForZip } from "@/lib/junk/market-pricing";
+import { findJunkMarketForZip, resolveJunkMarketAvailability } from "@/lib/junk/market-pricing";
 import { quoteJunkForMarket } from "@/lib/junk/full-quote";
 import { JunkAllocationError } from "@/lib/junk/allocation";
 import { recordQuoteVersion } from "@/lib/payments/funding";
@@ -101,6 +101,18 @@ export async function POST(request: Request) {
   if (!market) {
     return NextResponse.json({ error: "Junk removal isn't available at this address yet.", code: "JUNK_NOT_AVAILABLE" }, { status: 409 });
   }
+  // Never book (and never collect payment) against unapproved example pricing
+  // (directive §5/§94): an unapproved market cannot produce a bookable quote.
+  const availability = await resolveJunkMarketAvailability(market.marketCode, {
+    serviceLevel: input.details.serviceLevel,
+    pricingMode: input.details.pricingMode,
+    volumeTier: input.details.pricingMode === "VOLUME" ? (input.details.volumeTier ?? null) : null,
+    items: input.details.pricingMode === "ITEMS" ? (input.details.items ?? []).map((i) => i.code) : [],
+    specialItems: input.details.specialItems ?? [],
+  });
+  if (availability.state !== "AVAILABLE") {
+    return NextResponse.json({ error: availability.reason, code: availability.code, state: availability.state }, { status: 409 });
+  }
   const territory = await prisma.territory.findFirst({
     where: { marketId: market.id, status: "ACTIVE", zipCodes: { has: address.postalCode.slice(0, 5) } },
   });
@@ -157,13 +169,14 @@ export async function POST(request: Request) {
           itemNotes: input.itemNotes,
           itemLocation: d.itemLocation,
           hasHeavyItems: d.hasHeavyItems,
+          serviceLevel: d.serviceLevel,
           specialItems: d.specialItems,
           photoKeys: input.photoKeys,
           servicePriceCents: quote.servicePriceCents,
           surchargesCents: quote.surchargesCents,
           takeRatePercent: Math.round(plan.platformFeeBps / 100),
           platformTakeCents: plan.platformFeeCents,
-          crewPoolCents: plan.subtotalCents - plan.platformFeeCents,
+          crewPoolCents: plan.allInCents - plan.platformFeeCents,
           helpersRequired: quote.helpersRequired,
           // Helpers are paid hourly now, not a share; these are the planned amounts.
           helperSharePercent: 0,

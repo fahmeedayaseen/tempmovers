@@ -36,6 +36,20 @@ export type JunkLocationCode = (typeof JUNK_LOCATIONS)[number];
 export const JUNK_PRICING_MODES = ["VOLUME", "ITEMS"] as const;
 export type JunkPricingModeCode = (typeof JUNK_PRICING_MODES)[number];
 
+// Market Pricing Intelligence (Phase 1): the two service levels (directive §6).
+// ECONOMY is a budget curbside / easy-access pickup, a solo hauler where safe;
+// FULL_SERVICE is in-home removal, heavy items, stairs, larger loads and crews.
+export const JUNK_SERVICE_LEVELS = ["ECONOMY", "FULL_SERVICE"] as const;
+export type JunkServiceLevelCode = (typeof JUNK_SERVICE_LEVELS)[number];
+export const DEFAULT_JUNK_SERVICE_LEVEL: JunkServiceLevelCode = "FULL_SERVICE";
+
+/**
+ * Largest job (tier rank) that ECONOMY solo pickup may cover. Beyond a quarter
+ * truck a job needs a crew, so it is full-service only. A practicality/safety
+ * bound; admin-tunable thresholds are Phase 2.
+ */
+export const JUNK_ECONOMY_MAX_RANK = 2; // QUARTER
+
 export const JUNK_TIER_INFO: Record<JunkVolumeTierCode, { label: string; guide: string; baseHours: number }> = {
   SINGLE_ITEM: { label: "Single item", guide: "One bulky item, such as a sofa or a fridge", baseHours: 1 },
   EIGHTH: { label: "1/8 truck", guide: "About 2–3 cubic yards: a few pieces of furniture", baseHours: 1 },
@@ -130,31 +144,114 @@ export const MAX_JUNK_ITEM_QUANTITY = 20;
 
 const cents = z.number().int().min(0).max(1_000_000);
 
-/** What an admin may store in PricingRule.junkPriceTable. Every part is optional; anything left out keeps its default. */
-export const junkPriceTableOverrideSchema = z.object({
+/** One set of price overrides (shared, or specific to a service level). */
+export type JunkServiceLevelPriceOverride = {
+  minimumCents?: number;
+  tiersCents?: Partial<Record<JunkVolumeTierCode, number>>;
+  itemsCents?: Partial<Record<JunkItemCode, number>>;
+  surchargesCents?: Partial<Record<JunkSpecialItemCode, number>>;
+};
+
+/**
+ * What an admin may store in PricingRule.junkPriceTable. Every part is optional.
+ * `serviceLevels` holds prices approved SEPARATELY for ECONOMY and FULL_SERVICE
+ * (correction 1): an Economy approval writes only into serviceLevels.ECONOMY and
+ * can never overwrite a Full-Service rate, and vice versa. The top-level
+ * tiersCents/itemsCents remain for backward compatibility and are read as the
+ * FULL_SERVICE price only (every pre-existing booking is FULL_SERVICE).
+ */
+export type JunkPriceTableOverride = JunkServiceLevelPriceOverride & {
+  serviceLevels?: Partial<Record<JunkServiceLevelCode, JunkServiceLevelPriceOverride>>;
+};
+
+const junkServiceLevelPriceOverrideSchema = z.object({
   minimumCents: cents.optional(),
   tiersCents: z.record(z.enum(JUNK_VOLUME_TIERS), cents).optional(),
   itemsCents: z.record(z.enum(JUNK_ITEM_CODES), cents).optional(),
   surchargesCents: z.record(z.enum(JUNK_SPECIAL_ITEM_CODES), cents).optional(),
 }).strict();
 
+export const junkPriceTableOverrideSchema = junkServiceLevelPriceOverrideSchema.extend({
+  serviceLevels: z.record(z.enum(JUNK_SERVICE_LEVELS), junkServiceLevelPriceOverrideSchema).optional(),
+}).strict();
+
 /**
- * Merges a stored override over the defaults. A malformed stored value falls
- * back to the defaults entirely rather than pricing from half a table; the
- * admin route validates with the same schema, so that only happens if a row
- * was edited by hand.
+ * Merges a stored override over the defaults, for a given service level (if
+ * supplied, its specific prices layer on top of the shared ones). A malformed
+ * stored value falls back to the defaults entirely rather than pricing from half
+ * a table; the admin route validates with the same schema.
+ *
+ * NOTE: this merge includes the built-in DEFAULTS so every tier has a number for
+ * computation. Whether a given (serviceLevel, tier) is actually APPROVED for
+ * billing is a separate question answered by resolveApprovedJunkPrice(); the
+ * availability gate uses that, so an unapproved tier never reaches a billed quote.
  */
-export function resolveJunkPriceTable(override: unknown): JunkPriceTable {
+export function resolveJunkPriceTable(override: unknown, serviceLevel?: JunkServiceLevelCode): JunkPriceTable {
   if (override == null) return DEFAULT_JUNK_PRICE_TABLE;
   const parsed = junkPriceTableOverrideSchema.safeParse(override);
   if (!parsed.success) return DEFAULT_JUNK_PRICE_TABLE;
-  const o = parsed.data;
+  const base: JunkServiceLevelPriceOverride = parsed.data;
+  const sl: JunkServiceLevelPriceOverride = (serviceLevel && parsed.data.serviceLevels?.[serviceLevel]) || {};
   return {
-    minimumCents: o.minimumCents ?? DEFAULT_JUNK_PRICE_TABLE.minimumCents,
-    tiersCents: { ...DEFAULT_JUNK_PRICE_TABLE.tiersCents, ...o.tiersCents },
-    itemsCents: { ...DEFAULT_JUNK_PRICE_TABLE.itemsCents, ...o.itemsCents },
-    surchargesCents: { ...DEFAULT_JUNK_PRICE_TABLE.surchargesCents, ...o.surchargesCents },
+    minimumCents: sl.minimumCents ?? base.minimumCents ?? DEFAULT_JUNK_PRICE_TABLE.minimumCents,
+    tiersCents: { ...DEFAULT_JUNK_PRICE_TABLE.tiersCents, ...base.tiersCents, ...sl.tiersCents },
+    itemsCents: { ...DEFAULT_JUNK_PRICE_TABLE.itemsCents, ...base.itemsCents, ...sl.itemsCents },
+    surchargesCents: { ...DEFAULT_JUNK_PRICE_TABLE.surchargesCents, ...base.surchargesCents, ...sl.surchargesCents },
   };
+}
+
+/**
+ * Whether THIS market's stored override carries an explicitly-configured
+ * (approved) price for the requested service level and job, versus inheriting a
+ * built-in example. Used by the availability gate (correction 2): a billable
+ * quote is only issued when the exact service-level + tier price is approved —
+ * never from DEFAULT_JUNK_PRICE_TABLE and never from another service level.
+ *
+ * Back-compat: the top-level tiersCents/itemsCents (no serviceLevels block)
+ * count as the FULL_SERVICE approved price only, so existing markets keep
+ * working and ECONOMY can never inherit a Full-Service rate.
+ */
+export function resolveApprovedJunkPrice(
+  rawOverride: unknown,
+  serviceLevel: JunkServiceLevelCode,
+  job: {
+    pricingMode: JunkPricingModeCode;
+    volumeTier: JunkVolumeTierCode | null;
+    items?: JunkItemCode[];
+    specialItems?: JunkSpecialItemCode[];
+  },
+): { approved: true } | { approved: false; reason: string } {
+  const parsed = rawOverride == null ? null : junkPriceTableOverrideSchema.safeParse(rawOverride);
+  if (!parsed || !parsed.success) return { approved: false, reason: "This market has no approved junk price table." };
+  const o = parsed.data;
+  const sl = o.serviceLevels?.[serviceLevel];
+
+  // ONLY an explicit per-(service level) price counts as approved. Top-level
+  // "legacy" prices are never billable on their own — they must first be
+  // explicitly approved into a service-level slot by the controlled legacy
+  // procedure (which records the exact values), so default example prices can
+  // never be billed by blanket inheritance.
+  const tierApproved = (tier: JunkVolumeTierCode): boolean => typeof sl?.tiersCents?.[tier] === "number";
+  const itemApproved = (code: JunkItemCode): boolean => typeof sl?.itemsCents?.[code] === "number";
+  const surchargeApproved = (code: JunkSpecialItemCode): boolean => typeof sl?.surchargesCents?.[code] === "number";
+
+  if (job.pricingMode === "VOLUME") {
+    if (!job.volumeTier) return { approved: false, reason: "No volume tier on the request." };
+    if (!tierApproved(job.volumeTier)) return { approved: false, reason: `No approved ${serviceLevel} price for the ${job.volumeTier} tier in this market.` };
+  } else {
+    // ITEMS mode: EVERY requested item must have an explicitly approved price —
+    // a partially-approved list is rejected, never filled from built-in defaults.
+    const items = job.items ?? [];
+    if (items.length === 0) return { approved: false, reason: "No items on the request." };
+    const unapproved = items.filter((code) => !itemApproved(code));
+    if (unapproved.length > 0) return { approved: false, reason: `No approved ${serviceLevel} price for item(s): ${unapproved.join(", ")}.` };
+  }
+
+  // Both modes: every requested special item must have an approved surcharge.
+  const unapprovedSpecials = (job.specialItems ?? []).filter((code) => !surchargeApproved(code));
+  if (unapprovedSpecials.length > 0) return { approved: false, reason: `No approved ${serviceLevel} surcharge for special item(s): ${unapprovedSpecials.join(", ")}.` };
+
+  return { approved: true };
 }
 
 export class JunkQuoteError extends Error {}
@@ -170,6 +267,8 @@ export type JunkQuoteInput = {
   specialItems: JunkSpecialItemCode[];
   itemLocation: JunkLocationCode;
   hasHeavyItems: boolean;
+  /** Market Pricing Intelligence (Phase 1). Defaults to FULL_SERVICE; ECONOMY forces a solo crew and must pass eligibility. */
+  serviceLevel?: JunkServiceLevelCode;
 };
 
 export type JunkQuoteLine = { label: string; cents: number };
@@ -177,6 +276,7 @@ export type JunkQuoteLine = { label: string; cents: number };
 export type JunkQuote = {
   feeModel: typeof JUNK_FEE_MODEL;
   pricingMode: JunkPricingModeCode;
+  serviceLevel: JunkServiceLevelCode;
   servicePriceCents: number;
   surchargesCents: number;
   allInCents: number;
@@ -214,6 +314,18 @@ export function isHardJob(input: Pick<JunkQuoteInput, "itemLocation" | "hasHeavy
   return input.hasHeavyItems
     || input.itemLocation === "BASEMENT" || input.itemLocation === "UPSTAIRS"
     || input.specialItems.includes("PIANO") || input.specialItems.includes("HOT_TUB");
+}
+
+/**
+ * Whether a job may be booked as ECONOMY (solo curbside pickup). Easy-access
+ * curbside, nothing heavy/stairs/piano/hot-tub, and no larger than a quarter
+ * truck. This is the guard that stops a full-service job being silently
+ * downgraded to a cheaper solo price (directive §6).
+ */
+export function junkEconomyEligible(input: Pick<JunkQuoteInput, "itemLocation" | "hasHeavyItems" | "specialItems" | "pricingMode" | "volumeTier" | "items">): boolean {
+  if (input.itemLocation !== "CURBSIDE") return false;
+  if (isHardJob(input)) return false;
+  return sizeRank(input) <= JUNK_ECONOMY_MAX_RANK;
 }
 
 /**
@@ -280,7 +392,16 @@ export function calculateJunkQuote(input: JunkQuoteInput): JunkQuote {
   const crewPoolCents = allInCents - platformTakeCents;
 
   const rank = sizeRank(input);
-  const helpersRequired = junkHelpersRequired({ ...input, rank });
+  const serviceLevel = input.serviceLevel ?? DEFAULT_JUNK_SERVICE_LEVEL;
+  // ECONOMY is a solo curbside pickup and must pass eligibility; we never
+  // silently downgrade a full-service job or drop a required worker to hit a
+  // cheaper price (directive §6). FULL_SERVICE keeps the existing crew logic,
+  // so every pre-existing booking (which defaults to FULL_SERVICE) prices
+  // exactly as before.
+  if (serviceLevel === "ECONOMY" && !junkEconomyEligible(input)) {
+    throw new JunkQuoteError("Economy pickup isn't available for this job — it needs full-service (in-home, heavy items, stairs, or a larger load).");
+  }
+  const helpersRequired = serviceLevel === "ECONOMY" ? 0 : junkHelpersRequired({ ...input, rank });
   const helperShareCents = helpersRequired > 0 ? Math.floor((crewPoolCents * input.helperSharePercent) / 100) : 0;
   // The hauler takes the remainder, so rounding never loses or invents a cent.
   const haulerShareCents = crewPoolCents - helperShareCents * helpersRequired;
@@ -292,6 +413,7 @@ export function calculateJunkQuote(input: JunkQuoteInput): JunkQuote {
   return {
     feeModel: JUNK_FEE_MODEL,
     pricingMode: input.pricingMode,
+    serviceLevel,
     servicePriceCents,
     surchargesCents,
     allInCents,

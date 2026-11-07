@@ -4,10 +4,12 @@
 // Customer payment panel — VASRUE Digital Media, 29 October 2026.
 //
 // Pay before dispatch, customer side (payment spec §8): what was collected and
-// when, the disposal set-aside on junk, receipts and refunds, any change the
-// crew has asked for (approve and pay it, or decline), and cancel-before-
-// dispatch with a full refund. Reads GET /api/jobs/[id]/ledger and the
-// change-order routes; it computes no amounts of its own.
+// when, receipts, any change the crew has asked for (approve and pay it, or
+// decline), and cancel-before-dispatch with a full refund. Under Model B junk
+// pricing, disposal is an internal cost baked into the all-inclusive price —
+// there is no separate disposal charge or disposal refund to the customer
+// (legitimate cancellation refunds are unaffected). Reads GET
+// /api/jobs/[id]/ledger and the change-order routes; it computes no amounts.
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useState } from "react";
