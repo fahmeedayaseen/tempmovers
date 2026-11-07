@@ -85,11 +85,17 @@ Comparability rules (`normalizeObservation`), directive §3:
 - `LOW` confidence (national estimates) and stale observations are **excluded**
   from benchmarking — kept as context only, never treated as verified local quotes.
 
-Honest state of the seed (`lib/junk/seed-competitors.ts`): the only
-benchmarkable data points today are **LoadUp's local curbside single-item
-prices** (Indianapolis ~$79; Elkhart $65 / Granger $79). Every full-service
-truckload figure is a national average, recorded `LOW`, and excluded. Verified
-**local** full-service and disposal costs remain an owner blocker (see §7).
+Honest state of the seed (`lib/junk/seed-competitors.ts`): every row was
+**independently re-verified on 2026-11-07** against the competitor's own local
+page (see `VERIFICATION_LOG` in that file). The verified benchmarkable points
+are **LoadUp Indianapolis $65** (`goloadup.com/indianapolis/`), **Dropcurb
+Indianapolis $79** (`dropcurb.com/cost/bulk-junk-removal/indianapolis-in`),
+**LoadUp Elkhart $65** (`goloadup.com/junk-removal/in/elkhart/`) and **LoadUp
+Granger $79** (`goloadup.com/granger/`) — all curbside single-item, labor +
+disposal included. The earlier draft's **invented national full-service
+truckload figures were removed** (they were not verified local quotes). There is
+therefore no full-service benchmark in the seed; verified **local** full-service
+and transfer-station/disposal costs remain an owner blocker (see §7).
 
 ## 5. Competitive decision (directive §4, §92)
 
@@ -109,12 +115,28 @@ it, but **never below the floor**.
 
 ## 6. Missing/unapproved data handling (directive §5, §94)
 
-`decideJunkAvailability()` gates the quote and booking routes: a market with no
-owner-approved policy or no active price source returns a controlled
-**MANUAL_REVIEW** state (HTTP 409, `code: JUNK_PRICING_UNAPPROVED`) instead of
-quoting from unapproved example amounts; a ZIP no market serves is
-**UNAVAILABLE**. Proposed rates cannot be activated without an admin writing them
-into `PricingRule` (acceptance #10).
+`decideJunkAvailability()` gates the quote and booking routes: a market without a
+**market-specific** owner-approved policy **and** its **own** active price rule
+returns a controlled **MANUAL_REVIEW** state (HTTP 409, `code:
+JUNK_PRICING_UNAPPROVED`) instead of quoting from unapproved example amounts; a
+ZIP no market serves is **UNAVAILABLE**. The **US-DEFAULT fallback cannot
+activate a market** — `resolveJunkMarketAvailability` requires the policy
+`source === "market"` with a `carlApprovedAt`, and an exact-market active
+`PricingRule` (not a US-DEFAULT row). Proposed rates cannot be activated without
+an admin writing them into `PricingRule` (acceptance #10).
+
+### 6a. Approval path — recommendation → PricingRule (the only route to a live price)
+
+`lib/junk/pricing-approval.ts` holds the sole mechanism:
+`applyApprovedRecommendationToTable()` folds an **APPROVED** recommendation's
+price into the market's `PricingRule.junkPriceTable` tier map. It is a pure
+transform with a hard status gate — a PENDING or REJECTED recommendation throws,
+and a price below the recommendation's own floor is refused (defence in depth).
+It is never called automatically. Flow: engine writes PENDING → admin reviews
+and sets APPROVED (Phase 2 UI) → approval action applies the price and stamps the
+`PricingRule` active + `carlApprovedAt` → `resolveJunkMarketPricing()` then reads
+the approved table, so every live quote and booking is sourced from approved
+configuration, never example defaults.
 
 ## 7. Outstanding blockers (production-readiness)
 
@@ -138,7 +160,8 @@ into `PricingRule` (acceptance #10).
 
 **New**
 - `lib/junk/market-intelligence.ts` — pure engine (floor, normalization, decision).
-- `lib/junk/seed-competitors.ts` — verified observation data (shared by seed + tests).
+- `lib/junk/pricing-approval.ts` — the gated recommendation → PricingRule approval transform.
+- `lib/junk/seed-competitors.ts` — independently verified observation data + `VERIFICATION_LOG` (shared by seed + tests).
 - `prisma/seed-competitors.ts` — idempotent staging seed script (`npm run prisma:seed-competitors`).
 - `prisma/migrations/20261107000000_add_market_pricing_intelligence/migration.sql` — additive migration.
 - `tests/junk/market-intelligence.test.ts` — acceptance tests.

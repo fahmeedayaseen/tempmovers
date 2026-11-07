@@ -5,15 +5,20 @@
 -- Intelligence directive v1.0 and Carl R. Newborne's Phase 1 authorization
 -- (7 Nov 2026).
 --
--- Additive only: four new enums, one new column with a safe default, and two
+-- Additive only: five new enums, one new column with a safe default, and two
 -- new tables. No existing model, enum, column, index or migration is modified,
 -- reordered or dropped, so the frozen migration set and all Model B pricing,
 -- billing and settlement behaviour are untouched.
 --
--- Rollback: drop the two new tables, drop the four new enums, and drop the
--- "JunkRemovalDetail"."serviceLevel" column and the "JunkServiceLevel" enum.
+-- Rollback (reverse order): drop the two new tables
+-- ("MarketPriceRecommendation", "CompetitorObservation"); drop the
+-- "JunkRemovalDetail"."serviceLevel" column; then drop all five new enum types
+-- ("MarketPriceRecommendationStatus", "BenchmarkConfidence",
+-- "CompetitorServiceType", "CompetitorPricingBasis", "JunkServiceLevel").
 -- No data migration is required because every existing junk booking defaults
 -- to FULL_SERVICE, preserving its original pricing and settlement records.
+-- Apply/revert through Prisma migration tooling (prisma migrate deploy / a new
+-- down migration), not by editing a previously-applied migration.
 -- ============================================================================
 
 -- CreateEnum

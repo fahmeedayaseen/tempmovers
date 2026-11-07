@@ -55,11 +55,19 @@ export type JunkAvailability =
   | { state: "MANUAL_REVIEW"; code: "JUNK_PRICING_UNAPPROVED"; reason: string }
   | { state: "UNAVAILABLE"; code: "JUNK_NOT_AVAILABLE"; reason: string };
 
-/** Pure decision used by the quote and booking routes (acceptance tests #9, #10). */
-export function decideJunkAvailability(input: { marketServesZip: boolean; policyApproved: boolean; hasActivePriceRule: boolean }): JunkAvailability {
+/**
+ * Pure availability decision (acceptance tests #9, #10; correction BLOCKER 5).
+ *
+ * Live quoting requires the SPECIFIC market to be owner-approved: a
+ * market-specific approved payment policy AND a market-specific active
+ * PricingRule. The US-DEFAULT fallback (policy default-row or a US-DEFAULT price
+ * rule) deliberately does NOT satisfy this — an unapproved market can never be
+ * activated by the default, it is routed to manual review.
+ */
+export function decideJunkAvailability(input: { marketServesZip: boolean; policyApprovedForMarket: boolean; hasActiveMarketPriceRule: boolean }): JunkAvailability {
   if (!input.marketServesZip)
     return { state: "UNAVAILABLE", code: "JUNK_NOT_AVAILABLE", reason: "Junk removal isn't available in this area yet." };
-  if (!input.policyApproved || !input.hasActivePriceRule)
+  if (!input.policyApprovedForMarket || !input.hasActiveMarketPriceRule)
     return {
       state: "MANUAL_REVIEW",
       code: "JUNK_PRICING_UNAPPROVED",
@@ -71,12 +79,15 @@ export function decideJunkAvailability(input: { marketServesZip: boolean; policy
 export async function resolveJunkMarketAvailability(marketCode: string): Promise<JunkAvailability> {
   const [policy, rule] = await Promise.all([
     resolvePaymentPolicy(marketCode),
-    prisma.pricingRule.findFirst({ where: { marketCode: { in: [marketCode, "US-DEFAULT"] }, active: true } }),
+    // Exact market match only — a US-DEFAULT rule must not activate this market.
+    prisma.pricingRule.findFirst({ where: { marketCode, active: true } }),
   ]);
   return decideJunkAvailability({
     marketServesZip: true,
-    policyApproved: policy.carlApprovedAt != null,
-    hasActivePriceRule: rule != null,
+    // Must be this market's OWN approved policy (source "market"), not the
+    // default-row fallback, and it must carry an owner approval timestamp.
+    policyApprovedForMarket: policy.source === "market" && policy.carlApprovedAt != null,
+    hasActiveMarketPriceRule: rule != null,
   });
 }
 

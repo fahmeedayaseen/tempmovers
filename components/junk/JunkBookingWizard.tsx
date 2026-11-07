@@ -19,13 +19,14 @@ import { authFetch, NotSignedInError, type StoredUser } from "@/lib/client-auth"
 import StripePaymentForm from "@/components/StripePaymentForm";
 import {
   JUNK_ITEMS, JUNK_ITEM_CATEGORIES, JUNK_LOCATION_LABELS, JUNK_PROHIBITED_ITEMS, JUNK_SPECIAL_ITEMS, JUNK_TIER_INFO,
-  JUNK_VOLUME_TIERS, MAX_JUNK_ITEM_QUANTITY,
+  JUNK_VOLUME_TIERS, MAX_JUNK_ITEM_QUANTITY, junkEconomyEligible,
   type JunkItemCategoryCode, type JunkItemCode, type JunkLocationCode, type JunkPricingModeCode, type JunkSpecialItemCode,
-  type JunkVolumeTierCode, type JunkQuoteLine,
+  type JunkVolumeTierCode, type JunkQuoteLine, type JunkServiceLevelCode,
 } from "@/lib/junk/pricing";
 
 type PublicQuote = {
   pricingMode: JunkPricingModeCode;
+  serviceLevel?: JunkServiceLevelCode;
   servicePriceCents: number;
   surchargesCents: number;
   allInCents: number;
@@ -60,6 +61,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
   const [itemNotes, setItemNotes] = useState("");
   const [itemLocation, setItemLocation] = useState<JunkLocationCode>("CURBSIDE");
   const [hasHeavyItems, setHasHeavyItems] = useState(false);
+  const [serviceLevel, setServiceLevel] = useState<JunkServiceLevelCode>("FULL_SERVICE");
   const [specialItems, setSpecialItems] = useState<Set<JunkSpecialItemCode>>(new Set());
   const [photos, setPhotos] = useState<{ key: string; name: string }[]>([]);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
@@ -85,6 +87,14 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
     [items],
   );
 
+  // Economy (solo curbside) is only offered where the job qualifies; otherwise
+  // we book full-service rather than silently downgrade (directive §6).
+  const economyEligible = useMemo(
+    () => junkEconomyEligible({ pricingMode, volumeTier, items: pricingMode === "ITEMS" ? itemList : null, itemLocation, hasHeavyItems, specialItems: [...specialItems] }),
+    [pricingMode, volumeTier, itemList, itemLocation, hasHeavyItems, specialItems],
+  );
+  const effectiveServiceLevel: JunkServiceLevelCode = serviceLevel === "ECONOMY" && economyEligible ? "ECONOMY" : "FULL_SERVICE";
+
   const details = {
     pricingMode,
     volumeTier: pricingMode === "VOLUME" ? volumeTier : null,
@@ -93,6 +103,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
     specialItems: [...specialItems],
     itemLocation,
     hasHeavyItems,
+    serviceLevel: effectiveServiceLevel,
   };
 
   if (user.role !== "CUSTOMER") {
@@ -196,7 +207,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
     <div style={{ maxWidth: 920, margin: "0 auto", padding: "32px 16px 60px" }}>
       <p className="eyebrow">JUNK REMOVAL · INDIANAPOLIS</p>
       <h1 style={{ margin: "0 0 6px" }}>Book junk removal</h1>
-      <p className="footerNote" style={{ marginTop: 0 }}>One all-in price for hauling, labor and disposal, paid when you book. No crew is sent until your payment has gone through, and any disposal money the dump doesn't use comes back to you.</p>
+      <p className="footerNote" style={{ marginTop: 0 }}>One all-in price for hauling, labor and disposal, paid when you book. No crew is sent until your payment has gone through. Disposal is included in your price — there is no separate dump fee, surcharge, or disposal refund.</p>
       <div className="tabs">{stepLabel(1, "What's going")}{stepLabel(2, "Crew & price")}{stepLabel(3, "Review & pay")}</div>
 
       {step === 1 && (
@@ -264,6 +275,21 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
             <label><input type="checkbox" checked={hasHeavyItems} onChange={(e) => setHasHeavyItems(e.target.checked)} /> There are heavy or bulky items (appliances, a safe, a piano, a hot tub)</label>
           </p>
 
+          <h3>Service level</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+            <label style={{ opacity: economyEligible ? 1 : 0.5 }}>
+              <input type="radio" name="svc" checked={effectiveServiceLevel === "ECONOMY"} disabled={!economyEligible} onChange={() => setServiceLevel("ECONOMY")} /> Economy — curbside, solo hauler (budget-friendly)
+            </label>
+            <label>
+              <input type="radio" name="svc" checked={effectiveServiceLevel === "FULL_SERVICE"} onChange={() => setServiceLevel("FULL_SERVICE")} /> Full-service — in-home, heavy items, stairs, crew
+            </label>
+          </div>
+          <p className="footerNote" style={{ marginTop: 4 }}>
+            {economyEligible
+              ? "Economy is a curbside, easy-access pickup handled by a solo hauler. Full-service covers in-home removal, heavy items, stairs and larger loads."
+              : "Economy pickup needs curbside access, nothing heavy or upstairs, and no more than a quarter truck — so this job is booked as full-service."}
+          </p>
+
           <h3>Special items</h3>
           <p className="footerNote" style={{ marginTop: 0 }}>These need special handling or disposal and may add a fee.</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 6 }}>
@@ -306,6 +332,7 @@ export default function JunkBookingWizard({ user }: { user: StoredUser }) {
         <div className="dashboardGrid" style={{ marginTop: 0 }}>
           <section className="panel">
             <p className="eyebrow">YOUR CREW</p>
+            {quote.serviceLevel && <p className="eyebrow" style={{ marginBottom: 4 }}>{quote.serviceLevel === "ECONOMY" ? "ECONOMY · CURBSIDE" : "FULL-SERVICE"}</p>}
             <h3 style={{ marginTop: 0 }}>{quote.crewSize === 1 ? "One hauler with a truck" : `A hauler with a truck, plus ${quote.helpersRequired} helper${quote.helpersRequired > 1 ? "s" : ""}`}</h3>
             <p className="footerNote">About {quote.estimatedHours} hour{quote.estimatedHours === 1 ? "" : "s"} on site. Vetted, background-checked crew from the TempMovers network.</p>
             <p className="footerNote">One all-in price: loading, hauling and disposal are included. There is no separate dump fee.</p>

@@ -15,6 +15,7 @@ import {
   calculateJunkQuote, junkEconomyEligible, DEFAULT_JUNK_PRICE_TABLE, type JunkQuoteInput,
 } from "@/lib/junk/pricing";
 import { decideJunkAvailability } from "@/lib/junk/market-pricing";
+import { applyApprovedRecommendationToTable, RecommendationNotApprovedError } from "@/lib/junk/pricing-approval";
 import { COMPETITOR_OBSERVATIONS } from "@/lib/junk/seed-competitors";
 
 // Market Pricing Intelligence — Phase 1 (7 Nov 2026). The engine recommends; it
@@ -172,24 +173,24 @@ describe("market price decision", () => {
 describe("recommendMarketPrice over seeded observations", () => {
   const indy = COMPETITOR_OBSERVATIONS.filter((o) => o.marketCode === "INDY");
 
-  it("INDY economy single item: LoadUp's verified local $79 is below floor → FLOOR_HELD", () => {
+  it("INDY economy single item: LoadUp's verified local $65 is below floor → FLOOR_HELD", () => {
     const d = recommendMarketPrice({
       tier: "SINGLE_ITEM", serviceLevel: "ECONOMY", policy, approvedRateCents: 12900, observations: indy, asOf,
     });
     expect(d.status).toBe("FLOOR_HELD");
-    expect(d.benchmarkCompetitor).toBe("LoadUp");
-    // the non-economy rows were excluded from this economy benchmark
-    expect(d.excluded.length).toBeGreaterThan(0);
+    expect(d.benchmarkCompetitor).toBe("LoadUp"); // lowest valid comparable ($65 < Dropcurb $79)
+    expect(d.benchmarkPriceCents).toBe(6500);
+    expect(d.recommendedPriceCents!).toBeGreaterThanOrEqual(9286); // never below the $92.86 floor
   });
 
-  it("INDY full-service half truck: only national (LOW) data → excluded, no benchmark, approved rate retained", () => {
+  it("INDY full-service half truck: seed holds only economy single-item data → no comparable benchmark, approved rate retained", () => {
     const d = recommendMarketPrice({
       tier: "HALF", serviceLevel: "FULL_SERVICE", policy, approvedRateCents: 42500, observations: indy, asOf,
     });
     expect(["USE_APPROVED", "MANUAL_REVIEW"]).toContain(d.status);
     expect(d.benchmarkPriceCents).toBeNull();
-    // the national full-service figures were explicitly excluded as LOW confidence
-    expect(d.excluded.some((r) => /LOW confidence|national/i.test(r))).toBe(true);
+    // every economy/single-item row was excluded as not comparable to a full-service half-truck job
+    expect(d.excluded.length).toBeGreaterThan(0);
   });
 });
 
@@ -228,17 +229,56 @@ describe("service-level eligibility", () => {
 // ---------------------------------------------------------------------------
 // Availability gate (acceptance #9, #10) — no quoting from unapproved amounts.
 // ---------------------------------------------------------------------------
-describe("junk quote availability", () => {
-  it("a ZIP no market serves is UNAVAILABLE", () => {
-    expect(decideJunkAvailability({ marketServesZip: false, policyApproved: true, hasActivePriceRule: true }).state).toBe("UNAVAILABLE");
+describe("junk quote availability (BLOCKER 5: no US-DEFAULT bypass)", () => {
+  it("wrong ZIP / no market serves it → UNAVAILABLE (JUNK_NOT_AVAILABLE)", () => {
+    const a = decideJunkAvailability({ marketServesZip: false, policyApprovedForMarket: true, hasActiveMarketPriceRule: true });
+    expect(a.state).toBe("UNAVAILABLE");
+    if (a.state === "UNAVAILABLE") expect(a.code).toBe("JUNK_NOT_AVAILABLE");
   });
 
-  it("an unapproved market (no owner-approved policy) is MANUAL_REVIEW, never a quote", () => {
-    expect(decideJunkAvailability({ marketServesZip: true, policyApproved: false, hasActivePriceRule: true }).state).toBe("MANUAL_REVIEW");
-    expect(decideJunkAvailability({ marketServesZip: true, policyApproved: true, hasActivePriceRule: false }).state).toBe("MANUAL_REVIEW");
+  it("missing market-approved policy → MANUAL_REVIEW (409 JUNK_PRICING_UNAPPROVED)", () => {
+    const a = decideJunkAvailability({ marketServesZip: true, policyApprovedForMarket: false, hasActiveMarketPriceRule: true });
+    expect(a.state).toBe("MANUAL_REVIEW");
+    if (a.state === "MANUAL_REVIEW") expect(a.code).toBe("JUNK_PRICING_UNAPPROVED");
   });
 
-  it("approved policy + active price source → AVAILABLE", () => {
-    expect(decideJunkAvailability({ marketServesZip: true, policyApproved: true, hasActivePriceRule: true }).state).toBe("AVAILABLE");
+  it("missing active market price rule → MANUAL_REVIEW", () => {
+    expect(decideJunkAvailability({ marketServesZip: true, policyApprovedForMarket: true, hasActiveMarketPriceRule: false }).state).toBe("MANUAL_REVIEW");
+  });
+
+  it("US-DEFAULT fallback alone cannot activate a market (both market-specific flags false) → MANUAL_REVIEW", () => {
+    // resolveJunkMarketAvailability only sets these true for source==='market' + exact-market active rule,
+    // so a default-row policy / US-DEFAULT price rule leaves both false here.
+    expect(decideJunkAvailability({ marketServesZip: true, policyApprovedForMarket: false, hasActiveMarketPriceRule: false }).state).toBe("MANUAL_REVIEW");
+  });
+
+  it("valid owner-approved market (its own policy + its own active rule) → AVAILABLE", () => {
+    expect(decideJunkAvailability({ marketServesZip: true, policyApprovedForMarket: true, hasActiveMarketPriceRule: true }).state).toBe("AVAILABLE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Approval path (BLOCKER 1) — only an APPROVED recommendation becomes a price.
+// ---------------------------------------------------------------------------
+describe("recommendation -> PricingRule approval transform", () => {
+  const approved = { status: "APPROVED" as const, volumeTier: "HALF" as const, recommendedPriceCents: 37200, floorPriceCents: 27143 };
+
+  it("an APPROVED recommendation folds its price into the market's tier table (authoritative source)", () => {
+    const table = applyApprovedRecommendationToTable({ tiersCents: { SINGLE_ITEM: 9900 } }, approved);
+    expect(table.tiersCents).toMatchObject({ SINGLE_ITEM: 9900, HALF: 37200 });
+  });
+
+  it("a PENDING recommendation can never be applied (no path from proposal to live price)", () => {
+    expect(() => applyApprovedRecommendationToTable({}, { ...approved, status: "PENDING" })).toThrow(RecommendationNotApprovedError);
+  });
+
+  it("refuses to persist a price below the cost floor (defence in depth)", () => {
+    expect(() => applyApprovedRecommendationToTable({}, { ...approved, recommendedPriceCents: 20000 })).toThrow(RecommendationNotApprovedError);
+  });
+
+  it("does not mutate the input override", () => {
+    const current = { tiersCents: { SINGLE_ITEM: 9900 } };
+    applyApprovedRecommendationToTable(current, approved);
+    expect(current.tiersCents).toEqual({ SINGLE_ITEM: 9900 });
   });
 });

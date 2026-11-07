@@ -145,6 +145,12 @@ export const MAX_JUNK_ITEM_QUANTITY = 20;
 const cents = z.number().int().min(0).max(1_000_000);
 
 /** What an admin may store in PricingRule.junkPriceTable. Every part is optional; anything left out keeps its default. */
+export type JunkPriceTableOverride = {
+  minimumCents?: number;
+  tiersCents?: Partial<Record<JunkVolumeTierCode, number>>;
+  itemsCents?: Partial<Record<JunkItemCode, number>>;
+  surchargesCents?: Partial<Record<JunkSpecialItemCode, number>>;
+};
 export const junkPriceTableOverrideSchema = z.object({
   minimumCents: cents.optional(),
   tiersCents: z.record(z.enum(JUNK_VOLUME_TIERS), cents).optional(),

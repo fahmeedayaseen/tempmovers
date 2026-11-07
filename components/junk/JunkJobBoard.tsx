@@ -162,7 +162,7 @@ export default function JunkJobBoard() {
                 {a.job.accessNotes && <><br />Access: {a.job.accessNotes}</>}
                 {a.detail?.itemNotes && <><br />Notes: {a.detail.itemNotes}</>}
                 <br />Your {a.seat.toLowerCase()} pay: <strong>{money(a.payout?.netPayoutCents ?? a.shareCents)}</strong>{a.payout ? "" : " (estimate)"} · {PAY_STATUS_LABELS[payStatus(a.payout)]}
-                {a.seat === "HAULER" && <><br />Dump cost is reimbursed separately against the receipt.</>}
+                {a.seat === "HAULER" && <><br />Disposal is included in the job price; there is no separate dump-cost reimbursement.</>}
               </p>
               {a.detail && a.detail.customerPhotoUrls.length > 0 && (
                 <p className="footerNote">Customer photos: {a.detail.customerPhotoUrls.map((u, i) => <a key={u} href={u} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>photo {i + 1}</a>)}</p>
@@ -253,7 +253,7 @@ function DisposalEntry({ assignmentId, onSaved }: { assignmentId: string; onSave
       if (!res.ok) { onSaved(typeof data.error === "string" ? data.error : "Couldn't save the dump cost."); return; }
       onSaved(data.held
         ? `Dump cost saved and sent for review: ${(data.reasons ?? []).join(" ")}`
-        : `Dump cost approved. ${data.disposal?.unusedCents > 0 ? `${money(data.disposal.unusedCents)} unused goes back to the customer.` : ""} You're reimbursed ${money(data.disposal?.actualCents ?? cents)}.`);
+        : `Dump cost recorded for internal tracking. Disposal is included in the all-inclusive job price — there is no separate reimbursement or customer refund.`);
       setDollars("");
     } finally {
       setBusy(false);
