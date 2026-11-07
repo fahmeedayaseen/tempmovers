@@ -162,6 +162,14 @@ export type JunkServiceLevelPriceOverride = {
  */
 export type JunkPriceTableOverride = JunkServiceLevelPriceOverride & {
   serviceLevels?: Partial<Record<JunkServiceLevelCode, JunkServiceLevelPriceOverride>>;
+  /**
+   * Set ONLY by the controlled legacy-approval procedure (correction round 4,
+   * item 2). Until it is stamped, the top-level (legacy) tiersCents/itemsCents
+   * are NOT billable — a historical price in the database is never assumed to
+   * have owner approval. Its presence is the documented approval evidence.
+   */
+  legacyFullServiceApprovedAt?: string;
+  legacyFullServiceApprovedBy?: string;
 };
 
 const junkServiceLevelPriceOverrideSchema = z.object({
@@ -173,6 +181,8 @@ const junkServiceLevelPriceOverrideSchema = z.object({
 
 export const junkPriceTableOverrideSchema = junkServiceLevelPriceOverrideSchema.extend({
   serviceLevels: z.record(z.enum(JUNK_SERVICE_LEVELS), junkServiceLevelPriceOverrideSchema).optional(),
+  legacyFullServiceApprovedAt: z.string().optional(),
+  legacyFullServiceApprovedBy: z.string().optional(),
 }).strict();
 
 /**
@@ -214,26 +224,48 @@ export function resolveJunkPriceTable(override: unknown, serviceLevel?: JunkServ
 export function resolveApprovedJunkPrice(
   rawOverride: unknown,
   serviceLevel: JunkServiceLevelCode,
-  job: { pricingMode: JunkPricingModeCode; volumeTier: JunkVolumeTierCode | null },
+  job: {
+    pricingMode: JunkPricingModeCode;
+    volumeTier: JunkVolumeTierCode | null;
+    items?: JunkItemCode[];
+    specialItems?: JunkSpecialItemCode[];
+  },
 ): { approved: true } | { approved: false; reason: string } {
   const parsed = rawOverride == null ? null : junkPriceTableOverrideSchema.safeParse(rawOverride);
   if (!parsed || !parsed.success) return { approved: false, reason: "This market has no approved junk price table." };
   const o = parsed.data;
   const sl = o.serviceLevels?.[serviceLevel];
 
+  // Legacy top-level prices count as FULL_SERVICE ONLY when the controlled
+  // legacy-approval marker is present (correction: never assume historical
+  // prices were owner-approved).
+  const legacyApproved = serviceLevel === "FULL_SERVICE" && typeof o.legacyFullServiceApprovedAt === "string" && o.legacyFullServiceApprovedAt.length > 0;
+
+  /** A tier price is approved when set in this service level's layer, or legacy (if blessed). */
+  const tierApproved = (tier: JunkVolumeTierCode): boolean =>
+    typeof sl?.tiersCents?.[tier] === "number" || (legacyApproved && typeof o.tiersCents?.[tier] === "number");
+  const itemApproved = (code: JunkItemCode): boolean =>
+    typeof sl?.itemsCents?.[code] === "number" || (legacyApproved && typeof o.itemsCents?.[code] === "number");
+  const surchargeApproved = (code: JunkSpecialItemCode): boolean =>
+    typeof sl?.surchargesCents?.[code] === "number" || (legacyApproved && typeof o.surchargesCents?.[code] === "number");
+
   if (job.pricingMode === "VOLUME") {
     if (!job.volumeTier) return { approved: false, reason: "No volume tier on the request." };
-    if (typeof sl?.tiersCents?.[job.volumeTier] === "number") return { approved: true };
-    if (serviceLevel === "FULL_SERVICE" && typeof o.tiersCents?.[job.volumeTier] === "number") return { approved: true };
-    return { approved: false, reason: `No approved ${serviceLevel} price for the ${job.volumeTier} tier in this market.` };
+    if (!tierApproved(job.volumeTier)) return { approved: false, reason: `No approved ${serviceLevel} price for the ${job.volumeTier} tier in this market.` };
+  } else {
+    // ITEMS mode: EVERY requested item must have an explicitly approved price —
+    // a partially-approved list is rejected, never filled from built-in defaults.
+    const items = job.items ?? [];
+    if (items.length === 0) return { approved: false, reason: "No items on the request." };
+    const unapproved = items.filter((code) => !itemApproved(code));
+    if (unapproved.length > 0) return { approved: false, reason: `No approved ${serviceLevel} price for item(s): ${unapproved.join(", ")}.` };
   }
 
-  // ITEMS mode: approved when the market has configured item prices for this
-  // service level (or, for FULL_SERVICE, legacy top-level item prices).
-  const slHasItems = sl?.itemsCents != null && Object.keys(sl.itemsCents).length > 0;
-  const legacyItems = serviceLevel === "FULL_SERVICE" && o.itemsCents != null && Object.keys(o.itemsCents).length > 0;
-  if (slHasItems || legacyItems) return { approved: true };
-  return { approved: false, reason: `No approved ${serviceLevel} item pricing in this market.` };
+  // Both modes: every requested special item must have an approved surcharge.
+  const unapprovedSpecials = (job.specialItems ?? []).filter((code) => !surchargeApproved(code));
+  if (unapprovedSpecials.length > 0) return { approved: false, reason: `No approved ${serviceLevel} surcharge for special item(s): ${unapprovedSpecials.join(", ")}.` };
+
+  return { approved: true };
 }
 
 export class JunkQuoteError extends Error {}

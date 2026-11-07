@@ -3,11 +3,18 @@ import { CUSTOMER_BOOKING_PROTECTION_FEE_CENTS } from "@/lib/pricing";
 import {
   DEFAULT_JUNK_HELPER_SHARE_PERCENT, DEFAULT_JUNK_TAKE_RATE_PERCENT, resolveJunkPriceTable, resolveApprovedJunkPrice,
   type JunkPriceTable, type JunkServiceLevelCode, type JunkPricingModeCode, type JunkVolumeTierCode,
+  type JunkItemCode, type JunkSpecialItemCode,
 } from "@/lib/junk/pricing";
 import { resolvePaymentPolicy } from "@/lib/payments/policy";
 
 /** The job facets that decide which approved price applies (correction 1/2). */
-export type JunkPriceSelector = { serviceLevel: JunkServiceLevelCode; pricingMode: JunkPricingModeCode; volumeTier: JunkVolumeTierCode | null };
+export type JunkPriceSelector = {
+  serviceLevel: JunkServiceLevelCode;
+  pricingMode: JunkPricingModeCode;
+  volumeTier: JunkVolumeTierCode | null;
+  items?: JunkItemCode[];
+  specialItems?: JunkSpecialItemCode[];
+};
 
 // ---------------------------------------------------------------------------
 // Junk removal — VASRUE Digital Media, 28 October 2026.

@@ -38,6 +38,9 @@ export class RecommendationNotFoundError extends ApprovalError {
 export class ApprovalConflictError extends ApprovalError {
   constructor(message = "This recommendation was already approved or changed.") { super(message, 409); }
 }
+export class MarketPolicyNotApprovedError extends ApprovalError {
+  constructor(message = "This market has no owner-approved payment policy; approve the market's PaymentPolicyConfig before activating prices.") { super(message, 409); }
+}
 
 export type RecommendationStatusValue = "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED";
 
@@ -84,6 +87,20 @@ export function applyApprovedRecommendationToTable(
     tiersCents: { ...(slot.tiersCents ?? {}), [rec.volumeTier]: rec.recommendedPriceCents },
   };
   return { ...current, serviceLevels };
+}
+
+/**
+ * Stamp the controlled legacy-approval marker onto a market's override
+ * (correction: never assume historical prices were owner-approved). Returns a
+ * NEW override; the stamp is the documented approval evidence that lets the
+ * top-level legacy prices be read as FULL_SERVICE. Existing booking snapshots
+ * are not touched — this only governs NEW quotes.
+ */
+export function stampLegacyFullServiceApproval(
+  current: JunkPriceTableOverride,
+  by: { approvedAt: Date; approvedBy: string },
+): JunkPriceTableOverride {
+  return { ...current, legacyFullServiceApprovedAt: by.approvedAt.toISOString(), legacyFullServiceApprovedBy: by.approvedBy };
 }
 
 /**

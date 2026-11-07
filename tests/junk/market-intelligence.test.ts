@@ -17,8 +17,8 @@ import {
 } from "@/lib/junk/pricing";
 import { decideJunkAvailability } from "@/lib/junk/market-pricing";
 import {
-  applyApprovedRecommendationToTable, assertApprovable, RecommendationNotApprovedError,
-  ApprovalForbiddenError, FloorOutOfDateError,
+  applyApprovedRecommendationToTable, assertApprovable, stampLegacyFullServiceApproval,
+  RecommendationNotApprovedError, ApprovalForbiddenError, FloorOutOfDateError,
 } from "@/lib/junk/pricing-approval";
 import { COMPETITOR_OBSERVATIONS } from "@/lib/junk/seed-competitors";
 
@@ -265,15 +265,34 @@ describe("per-service-level pricing", () => {
     expect(resolveJunkPriceTable(override, "FULL_SERVICE").tiersCents.SINGLE_ITEM).toBe(17900);
   });
 
-  it("legacy top-level tiersCents reads as the FULL_SERVICE price (back-compat), never Economy", () => {
+  it("legacy top-level prices are NOT billable until blessed; once blessed they count as FULL_SERVICE only", () => {
     const legacy: JunkPriceTableOverride = { tiersCents: { HALF: 32900 } };
-    expect(resolveApprovedJunkPrice(legacy, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(true);
-    expect(resolveApprovedJunkPrice(legacy, "ECONOMY", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
+    // Unblessed: historical price in the DB is never assumed approved.
+    expect(resolveApprovedJunkPrice(legacy, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
+    // Blessed via the controlled marker:
+    const blessed = stampLegacyFullServiceApproval(legacy, { approvedAt: new Date("2026-11-07"), approvedBy: "admin-1" });
+    expect(resolveApprovedJunkPrice(blessed, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(true);
+    // Still never Economy.
+    expect(resolveApprovedJunkPrice(blessed, "ECONOMY", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
   });
 
   it("an unconfigured (service level, tier) is NOT approved — never billed from built-in defaults", () => {
     expect(resolveApprovedJunkPrice({}, "ECONOMY", { pricingMode: "VOLUME", volumeTier: "SINGLE_ITEM" }).approved).toBe(false);
     expect(resolveApprovedJunkPrice(null, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF" }).approved).toBe(false);
+  });
+
+  it("ITEMS mode: every requested item must be explicitly approved; a partial list is rejected", () => {
+    const override: JunkPriceTableOverride = { serviceLevels: { ECONOMY: { itemsCents: { SOFA: 9900 } } } };
+    expect(resolveApprovedJunkPrice(override, "ECONOMY", { pricingMode: "ITEMS", volumeTier: null, items: ["SOFA"] }).approved).toBe(true);
+    const partial = resolveApprovedJunkPrice(override, "ECONOMY", { pricingMode: "ITEMS", volumeTier: null, items: ["SOFA", "MATTRESS"] });
+    expect(partial.approved).toBe(false);
+    if (!partial.approved) expect(partial.reason).toMatch(/MATTRESS/);
+  });
+
+  it("requested special items must have an approved surcharge (both modes)", () => {
+    const override: JunkPriceTableOverride = { serviceLevels: { FULL_SERVICE: { tiersCents: { HALF: 32900 }, surchargesCents: { MATTRESS: 2500 } } } };
+    expect(resolveApprovedJunkPrice(override, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF", specialItems: ["MATTRESS"] }).approved).toBe(true);
+    expect(resolveApprovedJunkPrice(override, "FULL_SERVICE", { pricingMode: "VOLUME", volumeTier: "HALF", specialItems: ["TIRES"] }).approved).toBe(false);
   });
 
   it("an approved Economy tier does not make the Full-Service tier approved", () => {

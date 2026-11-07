@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRole, AuthError } from "@/lib/auth";
 import { approveMarketRecommendation, RECOMMENDATION_APPROVER_ROLES } from "@/lib/junk/approve-recommendation";
 import { ApprovalError } from "@/lib/junk/pricing-approval";
+import { ForbiddenError, MarketNotFoundError } from "@/lib/market-access";
 
 /**
  * Approve a market price recommendation — correction 2.
@@ -25,6 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ approved: true, ...result });
   } catch (e) {
     if (e instanceof ApprovalError) return NextResponse.json({ error: e.message }, { status: e.httpStatus });
+    if (e instanceof ForbiddenError || e instanceof MarketNotFoundError) return NextResponse.json({ error: e.message }, { status: e.status });
     throw e;
   }
 }

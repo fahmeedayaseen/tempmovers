@@ -40,6 +40,8 @@ export async function POST(request: Request) {
     serviceLevel: d.serviceLevel,
     pricingMode: d.pricingMode,
     volumeTier: d.pricingMode === "VOLUME" ? (d.volumeTier ?? null) : null,
+    items: d.pricingMode === "ITEMS" ? (d.items ?? []).map((i) => i.code) : [],
+    specialItems: d.specialItems ?? [],
   });
   if (availability.state !== "AVAILABLE") {
     return NextResponse.json({ error: availability.reason, code: availability.code, state: availability.state }, { status: 409 });
